@@ -1,3 +1,4 @@
+
 # 🔥 FireWatch Boyacá
 
 **Sistema distribuido de analítica geoespacial para el monitoreo de anomalías térmicas y la estimación de riesgo de incendios de cobertura vegetal en Boyacá, Colombia.**
