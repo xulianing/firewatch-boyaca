@@ -1,0 +1,89 @@
+# =============================================================================
+# FireWatch Boyacá — configuración central (ÚNICA fuente de parámetros)
+# Ningún módulo puede tener fechas, rutas, umbrales ni pesos escritos en el código.
+# Cambios aquí → avisar en el grupo. Después del DATA FREEZE (sáb 7) no se cambia nada.
+# =============================================================================
+
+proyecto:
+  nombre: FireWatch Boyacá
+  version_config: "1.1"            # 1.1 = ventana 2022–2026 (ADR-0004)
+
+ventana:                            # ADR-0004
+  fecha_inicio: "2022-01-01"
+  fecha_fin: "2026-10-31"           # último mes completo antes de la entrega
+  anios_linea_base: [2022, 2023, 2024, 2025]   # solo años completos
+
+territorio:
+  pais_iso3: COL
+  cod_dpto_foco: "15"               # Boyacá (texto, nunca número)
+  n_municipios_foco: 123
+  bbox_colombia: {lon_min: -79.1, lat_min: -4.3, lon_max: -66.8, lat_max: 13.5}
+  crs: "EPSG:4326"
+  tolerancia_simplificacion_grados: 0.001     # ≈110 m < píxel VIIRS de 375 m
+
+rutas:
+  raw: data/raw
+  silver: data/silver
+  gold: data/gold
+  benchmarks_resultados: benchmarks/results
+  benchmarks_figuras: benchmarks/figures
+  provincias_csv: config/provincias_boyaca.csv
+
+firms:
+  satelites: ["N", "N20"]           # VIIRS S-NPP, NOAA-20 (sin MODIS ni NOAA-21)
+  anios_archivo_pais: [2022, 2023, 2024, 2025]   # CSV anual por país (SP)
+  rango_archive_download: ["2026-01-01", "2026-10-31"]   # SP + NRT
+  filtros:
+    type_permitido: 0               # solo en SP
+    confianza_excluida: ["l"]
+    frp_minimo: 0.0
+  mascara_estatica:
+    type_estatico: 2
+    tamano_celda_grados: 0.005
+    anios_fuente: [2022, 2023, 2024, 2025]
+  dedup_claves: [latitude, longitude, acq_date, acq_time, satellite]
+
+meteo:
+  endpoint: "https://archive-api.open-meteo.com/v1/archive"
+  zona_horaria: "America/Bogota"
+  variables_horarias:
+    - temperature_2m
+    - relative_humidity_2m
+    - precipitation
+    - wind_speed_10m
+    - et0_fao_evapotranspiration
+  pausa_entre_peticiones_s: 1.0
+  reintentos: 3
+
+paralelo:                           # L2 multiprocessing
+  tamano_bloque_filas: 150000
+  procesos_produccion: 4
+  benchmark:
+    procesos: [1, 2, 4, 8]
+    repeticiones: 5
+    calentamiento: 1                # corridas descartadas
+    escalado_debil: true
+
+spark:                              # L3 PySpark local
+  master_produccion: "local[*]"
+  app_name: firewatch
+  driver_memory: "4g"
+  shuffle_partitions_produccion: 8
+  benchmark:
+    masters: ["local[1]", "local[2]", "local[4]", "local[*]"]
+    shuffle_partitions: [4, 8, 16, 200]
+    repeticiones: 5
+  ventana_precip_dias: 30
+  umbral_dia_seco_mm: 1.0
+  meses_previos_h: 3
+
+irat:                               # Arquitectura §7 — CONGELADO
+  pesos: {H: 0.30, P: 0.25, D: 0.15, T: 0.15, R: 0.10, W: 0.05}
+  mezcla_h: {loyo: 0.5, reciente: 0.5}
+  normalizacion: rango_percentil
+  categorias: ["Muy bajo", "Bajo", "Moderado", "Alto", "Muy alto"]   # quintiles
+  categorias_alto: ["Alto", "Muy alto"]   # para K4 y K5
+
+calidad:
+  max_pct_sin_municipio: 1.0
+  horas_por_dia: 24

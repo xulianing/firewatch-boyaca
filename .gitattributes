@@ -1,0 +1,13 @@
+# Finales de línea normalizados (equipo mixto Windows / Linux / macOS)
+* text=auto eol=lf
+*.bat text eol=crlf
+
+# Binarios: sin diff ni merge (un solo dueño por archivo)
+*.pbix binary
+*.pkt  binary
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.mp4  binary
+*.docx binary
+*.pptx binary

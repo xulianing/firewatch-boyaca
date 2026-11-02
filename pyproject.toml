@@ -1,0 +1,19 @@
+# Empaqueta src/firewatch para poder hacer `pip install -e .`.
+# Motivo: los procesos que lanza multiprocessing con el método spawn (Windows) deben poder
+# importar `firewatch` como paquete instalado; con imports relativos o sys.path manual fallan.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firewatch"
+version = "0.1.0"
+description = "FireWatch Boyacá: analítica geoespacial de anomalías térmicas y riesgo de incendios"
+requires-python = ">=3.11,<3.12"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

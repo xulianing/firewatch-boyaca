@@ -1,0 +1,43 @@
+# --- Datos (nunca se versionan; se regeneran con scripts/download_all.py) ---
+data/raw/**
+data/silver/**
+data/gold/**
+!data/**/.gitkeep
+!data/README.md
+*.parquet
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.gpkg
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Spark ---
+spark-warehouse/
+metastore_db/
+derby.log
+*.crc
+_SUCCESS
+
+# --- Sistema / IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Power BI: archivos temporales y de bloqueo ---
+~$*.pbix
+*.pbix.lock
+
+# --- Logs ---
+logs/
+*.log

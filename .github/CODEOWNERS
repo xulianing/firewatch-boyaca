@@ -1,0 +1,22 @@
+# Reemplazar <usuario-A>, <usuario-B> y <usuario-C> por los usuarios reales de GitHub.
+# GitHub pide la revisión del dueño automáticamente en cada pull request.
+
+*                         <usuario-A> <usuario-B> <usuario-C>
+
+/network/                 <usuario-A>
+/docs/ieee/               <usuario-A>
+/docs/poster/             <usuario-A>
+
+/src/firewatch/ingest/    <usuario-B>
+/src/firewatch/parallel/  <usuario-B>
+/notebooks/               <usuario-B>
+/scripts/                 <usuario-B>
+/docs/demo/               <usuario-B>
+
+/src/firewatch/spark/     <usuario-C>
+/dashboard/               <usuario-C>
+/docs/diccionario_datos.md <usuario-C>
+
+/config/                  <usuario-B> <usuario-C>
+/src/firewatch/quality/   <usuario-B> <usuario-C>
+/benchmarks/              <usuario-B> <usuario-C>

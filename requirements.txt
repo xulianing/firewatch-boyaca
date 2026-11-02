@@ -1,0 +1,21 @@
+# FireWatch Boyacá — dependencias de ejecución (Python 3.11)
+# Versiones fijadas para reproducibilidad. C las confirma el día 1 instalando en limpio;
+# si alguna falla, se ajusta aquí y se avisa en el grupo (no se instalan paquetes por fuera).
+# numpy < 2 por compatibilidad con PySpark 3.5.
+
+numpy==1.26.4
+pandas==2.2.3
+pyarrow==18.1.0
+
+geopandas==1.0.1
+shapely==2.0.6
+pyogrio==0.10.0
+
+pyspark==3.5.5          # requiere Java 17
+
+matplotlib==3.9.2
+seaborn==0.13.2
+scipy==1.14.1           # solo para el p-valor de Spearman en la validación del IRAT
+
+requests==2.32.3
+PyYAML==6.0.2
