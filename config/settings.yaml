@@ -28,6 +28,7 @@ rutas:
   benchmarks_resultados: benchmarks/results
   benchmarks_figuras: benchmarks/figures
   provincias_csv: config/provincias_boyaca.csv
+  centroides: config/centroides_boyaca.csv     # puente temporal para meteo hasta silver/dim_municipio (B3)
 
 firms:
   satelites: ["N", "N20"]           # VIIRS S-NPP, NOAA-20 (sin MODIS ni NOAA-21)
@@ -43,17 +44,25 @@ firms:
     anios_fuente: [2022, 2023, 2024, 2025]
   dedup_claves: [latitude, longitude, acq_date, acq_time, satellite]
 
-meteo:
-  endpoint: "https://archive-api.open-meteo.com/v1/archive"
-  zona_horaria: "America/Bogota"
-  variables_horarias:
+meteo:                              # firewatch.ingest.meteo (claves en inglés: las lee load_config)
+  base_url: "https://archive-api.open-meteo.com/v1/archive"
+  model: era5_seamless              # CONGELADO (3 nov 2026); cambiarlo exige ADR
+  timezone: "America/Bogota"
+  hourly_vars:                      # ADR-0003
     - temperature_2m
     - relative_humidity_2m
     - precipitation
     - wind_speed_10m
     - et0_fao_evapotranspiration
-  pausa_entre_peticiones_s: 1.0
-  reintentos: 3
+  wind_speed_unit: ms               # raw en m/s; silver convierte a km/h (diccionario de datos)
+  cola_start: "2026-10-26"          # tramo base → 2026-10-25; cola desde el 6 nov (rezago ERA5)
+  pace_seconds: 60                  # 1 petición por minuto
+  max_attempts: 5
+  timeout_connect_s: 10
+  timeout_read_s: 180
+  budget: {daily: 9000, hourly: 4500, minute: 500}   # margen bajo los límites gratuitos
+  coord_decimals: 4
+  expected_n_locations: 123
 
 paralelo:                           # L2 multiprocessing
   tamano_bloque_filas: 150000
