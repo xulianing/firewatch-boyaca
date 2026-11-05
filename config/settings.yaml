@@ -19,10 +19,10 @@ territorio:
   n_municipios_foco: 123
   bbox_colombia: {lon_min: -79.1, lat_min: -4.3, lon_max: -66.8, lat_max: 13.5}
   crs: "EPSG:4326"
-  tolerancia_simplificacion_grados: 0.001     # ≈110 m < píxel VIIRS de 375 m
 
 rutas:
   raw: data/raw
+  raw_mgn: data/raw/dane/MGN2025_MPIO_GRAFICO/MGN_ADM_MPIO_GRAFICO.shp
   silver: data/silver
   gold: data/gold
   benchmarks_resultados: benchmarks/results
@@ -63,6 +63,24 @@ meteo:                              # firewatch.ingest.meteo (claves en inglés:
   budget: {daily: 9000, hourly: 4500, minute: 500}   # margen bajo los límites gratuitos
   coord_decimals: 4
   expected_n_locations: 123
+
+dane:                               # firewatch.ingest.dane (foco: se lee de territorio)
+  vigencia: 2025
+  n_mpios_pais: [1100, 1125]
+  n_dptos: 33
+  code_column: mpio_cdpmp
+  crs_origen: 4326                  # V-D5: el .prj del MGN 2025 declara WGS 84
+  crs_area: 9377
+  coord_decimals: 4
+  simplify_tolerance_deg: 0.0003    # ≈33 m < píxel VIIRS de 375 m (V-D13 con el MGN real)
+  area_tol: 0.05
+  area_tol_share: 0.95
+  area_foco_km2: [21000, 25000]
+  simplify_area_tol: 0.01
+  sjoin_check_points: 100000
+  sjoin_agreement_min: 0.999
+  sjoin_seed: 20261104
+  elevation_range: [100, 4500]
 
 paralelo:                           # L2 multiprocessing
   tamano_bloque_filas: 150000

@@ -156,7 +156,7 @@ flowchart TB
 ```mermaid
 flowchart TD
     A1["raw/firms/*.csv<br/>VIIRS S-NPP + NOAA-20 Colombia 2022-2026"] --> B1
-    A2["raw/dane/MGN_MPIO.shp"] --> B0["Simplificar geometria<br/>tolerancia ~0.001 grados<br/>reproyectar a EPSG 4326"]
+    A2["raw/dane/MGN_MPIO.shp"] --> B0["Simplificar geometria<br/>tolerancia ~0.0003 grados<br/>reproyectar a EPSG 4326"]
     B0 --> B1["L2 limpieza por bloque<br/>tipos, rangos, dedup"]
     B1 --> B2["L2 filtros de calidad<br/>type = 0, confidence distinto de l"]
     B2 --> B3["L2 sjoin por bloque<br/>punto en poligono"]
@@ -212,7 +212,7 @@ Los volúmenes marcados con `~` son estimaciones que se confirman el día 1.
 - **Grilla completa con ceros.** La base del join es la tabla de clima (todos los municipio-día). Si se partiera de las detecciones, los días sin incendio desaparecerían y las correlaciones clima-detecciones quedarían sesgadas. Es el error más común en este tipo de proyectos.
 - **Ventana temporal fija: 2022-01-01 → 2026-10-31** (58 meses completos; octubre de 2026 es el último mes completo antes de la entrega). Se parametriza en `settings.yaml`, de modo que cambiarla solo requiere tocar ese archivo.
 - **Propensión histórica sin fuga de información (*leave-one-year-out*).** Para el mes *m* del año *a*, la propensión se calcula con todos los años de la ventana **excepto *a*** (quedan 3–4 años de referencia; ver §7.2). Si se incluyera el propio año, el índice "vería" el resultado que luego se usa para validarlo.
-- **Simplificación de geometrías** con una tolerancia de ~0,001° (≈110 m), menor que el píxel VIIRS de 375 m. Reduce memoria y tiempo por proceso sin alterar de forma material la asignación de municipio.
+- **Simplificación de geometrías** con una tolerancia de ~0,0003° (≈33 m), menor que el píxel VIIRS de 375 m. Reduce memoria y tiempo por proceso sin alterar de forma material la asignación de municipio.
 - **Asignación de bloques en multiprocessing:** bloques de tamaño fijo (por ejemplo, 100–200k filas) y no un bloque por año, porque los años tienen volúmenes muy distintos y eso desbalancea la carga. Cada proceso trabajador carga los polígonos una sola vez (función `initializer` del Pool) para no serializarlos con cada tarea.
 
 ---
