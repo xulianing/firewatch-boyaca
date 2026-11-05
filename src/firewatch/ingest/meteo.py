@@ -10,7 +10,7 @@ Fuera de alcance (pertenece a otras capas)
     - Calcular centroides            → B3 (silver.dim_municipio). Puente temporal: config/centroides_boyaca.csv
     - Agregar horario → diario       → Spark L3 (build_daily.py).
 
-Pendiente en este módulo (v0.2, B3)
+Pendiente en este módulo (B3)
     - a_silver_horario: JSON → silver/clima_horario (Parquet por anio), con el viento convertido
       de m/s a km/h (×3,6) según docs/diccionario_datos.md, y la `elevation` devuelta por la API
       para silver/dim_municipio.
@@ -33,20 +33,20 @@ Decisiones de diseño (ver Guía B1 §5 y ADR-0003/0004)
           (la respuesta incluye generationtime_ms), así que se compara `content_sha256`, el hash
           canónico del bloque `hourly` + `hourly_units` + celda devuelta.
 
-Estado de implementación (v0.1 — prueba de extremo a extremo con Tunja, 3 nov 2026)
-    Implementado: load_config, load_locations, make_session, fetch, validate_payload, process_task
-                  (+ helpers puros: build_segments, check_segment_available, build_tasks,
-                  build_params, request_weight, params_fingerprint, target_path, write_atomic).
-    Pendiente:    QuotaBudget, RateLimiter, classify_response, fetch_with_retry, manifiesto,
-                  is_cached, validate_dataset, run_download, main.
+Estado de implementación
+    v0.1 (3 nov): load_config, load_locations, make_session, fetch, validate_payload, process_task
+                  (+ helpers puros).
+    v0.2 (4 nov): RateLimiter, classify_response, fetch_with_retry, manifiesto (append/read/latest),
+                  is_cached, run_download, main → descarga reanudable de los 123 municipios.
+    Pendiente:    QuotaBudget (la salvaguarda es el ritmo fijo + el 429 del servidor), validate_dataset.
 
-Uso previsto (CLI, cuando main esté implementado)
+Uso (CLI, v0.2)
     python -m firewatch.ingest.meteo --tramo base --dry-run          # plan + presupuesto, sin red
     python -m firewatch.ingest.meteo --tramo base --only 15001       # un municipio (prueba)
     python -m firewatch.ingest.meteo --tramo base --limit 5          # primeros 5 pendientes
     python -m firewatch.ingest.meteo --tramo base                    # corrida completa (reanudable)
     python -m firewatch.ingest.meteo --validate-only                 # solo validación de dataset
-Uso actual (v0.1):
+Prueba de humo de Tunja:
     python scripts/smoke_meteo_tunja.py
 """
 
@@ -59,6 +59,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -194,6 +195,8 @@ class RunSummary:
     weight_spent: float
     elapsed_s: float
     pending: list[str]          # cod_mpio que siguen pendientes → próxima corrida
+    stop_reason: str | None = None   # None | "fatal" | "quota" | "interrupted" | "consecutive_failures"
+    planned_weight: float = 0.0      # peso estimado de lo pendiente (dry-run y log)
 
 
 # =============================================================================
@@ -208,6 +211,11 @@ class FatalRequestError(MeteoError):
 
 class TransientRequestError(MeteoError):
     """Timeout, conexión, 5xx, 429 minutal/horario → se reintenta con backoff."""
+
+    def __init__(self, message: str, attempts: int = 1, http_status: int | None = None) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+        self.http_status = http_status
 
 class DailyQuotaExceeded(MeteoError):
     """429 por límite diario (o presupuesto local agotado) → detener con gracia y reanudar mañana."""
@@ -495,17 +503,62 @@ def content_fingerprint(payload: dict[str, Any]) -> str:
 
 def append_manifest(cfg: MeteoConfig, result: DownloadResult, fingerprint: str) -> None:
     """Anexa una línea (abrir en modo 'a', flush + fsync). Nunca reescribe líneas anteriores."""
-    raise NotImplementedError
+    rep = result.validation
+    cell = (rep.details.get("cell") or {}).get("returned") if rep else None
+    entry = {
+        "ts_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "cod_mpio": result.task.location.cod_mpio,
+        "segment": result.task.segment.name,
+        "start": result.task.segment.start.isoformat(),
+        "end": result.task.segment.end.isoformat(),
+        "fingerprint": fingerprint,
+        "status": result.status.value,
+        "attempts": result.attempts,
+        "weight": round(result.weight, 3),
+        "http_status": result.http_status,
+        "bytes": result.bytes,
+        "sha256": result.sha256,
+        "content_sha256": result.content_sha256,
+        "path": str(result.path) if result.path else None,
+        "cell_lat": cell[0] if cell else None,
+        "cell_lon": cell[1] if cell else None,
+        "elevation": rep.details.get("elevation") if rep else None,
+        "checks": rep.checks if rep else None,
+        "elapsed_s": round(result.elapsed_s, 2) if result.elapsed_s is not None else None,
+        "error": result.error,
+    }
+    cfg.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(cfg.manifest_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def read_manifest(cfg: MeteoConfig) -> list[dict[str, Any]]:
     """Lee el JSONL tolerando una última línea truncada (corte de energía) → se descarta con warning."""
-    raise NotImplementedError
+    if not cfg.manifest_path.exists():
+        return []
+    entries: list[dict[str, Any]] = []
+    lines = cfg.manifest_path.read_text(encoding="utf-8").splitlines()
+    for i, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            if i == len(lines):
+                log.warning("Manifiesto: última línea truncada (se descarta): %r", line[:80])
+            else:
+                raise MeteoError(f"Manifiesto corrupto en la línea {i} de {cfg.manifest_path}")
+    return entries
 
 
 def latest_entries(manifest: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
     """Último registro por (cod_mpio, segment). Es la 'vista de estado' para reanudar."""
-    raise NotImplementedError
+    state: dict[tuple[str, str], dict[str, Any]] = {}
+    for e in manifest:                      # el orden del archivo es cronológico
+        state[(e["cod_mpio"], e["segment"])] = e
+    return state
 
 
 # =============================================================================
@@ -522,7 +575,35 @@ def is_cached(task: DownloadTask, cfg: MeteoConfig,
       3. (Opcional, --revalidate) validate_payload vuelve a pasar sobre el archivo.
     Si el archivo existe pero no cumple 2 → se trata como pendiente y se sobrescribe (con log WARNING).
     """
-    raise NotImplementedError
+    return _is_cached(task, cfg, state, revalidate=False)
+
+
+def _is_cached(task: DownloadTask, cfg: MeteoConfig, state: dict[tuple[str, str], dict[str, Any]],
+               revalidate: bool) -> bool:
+    path = target_path(task, cfg)
+    if not path.exists() or path.stat().st_size == 0:
+        return False
+    entry = state.get((task.location.cod_mpio, task.segment.name))
+    fp = params_fingerprint(build_params(task, cfg))
+    if entry is None or entry.get("status") != TaskStatus.OK.value:
+        log.warning("[%s/%s] existe %s pero no hay registro 'ok' en el manifiesto → se vuelve a descargar",
+                    task.location.cod_mpio, task.segment.name, path.name)
+        return False
+    if entry.get("fingerprint") != fp:
+        log.warning("[%s/%s] la huella cambió (%s → %s) → se vuelve a descargar",
+                    task.location.cod_mpio, task.segment.name, entry.get("fingerprint"), fp)
+        return False
+    data = path.read_bytes()
+    if sha256_bytes(data) != entry.get("sha256"):
+        log.warning("[%s/%s] el archivo no coincide con el sha256 del manifiesto → se vuelve a descargar",
+                    task.location.cod_mpio, task.segment.name)
+        return False
+    if revalidate:
+        rep = validate_payload(json.loads(data), task, cfg)
+        if not rep.ok:
+            log.warning("[%s/%s] la revalidación falla: %s", task.location.cod_mpio, task.segment.name, rep.errors)
+            return False
+    return True
 
 
 def write_atomic(path: Path, data: bytes) -> None:
@@ -556,7 +637,13 @@ class RateLimiter:
 
     def wait(self) -> None:
         """Duerme lo necesario (time.monotonic, inmune a cambios de reloj)."""
-        raise NotImplementedError
+        now = time.monotonic()
+        if self._last is not None:
+            remaining = self.pace - (now - self._last)
+            if remaining > 0:
+                time.sleep(remaining)
+                now = time.monotonic()
+        self._last = now
 
 
 class QuotaBudget:
@@ -616,8 +703,19 @@ def classify_response(status: int, body: bytes) -> None:
       5xx                       → TransientRequestError
     Nota: el texto exacto de `reason` se registra tal cual en el manifiesto; la detección de
     "diario" se hace por palabra clave (p. ej. 'daily') y se ajusta tras ver el primer 429 real.
+    Otros 4xx (403, 404…) → FatalRequestError: no se arreglan reintentando.
     """
-    raise NotImplementedError
+    if status == 200:
+        return
+    reason = _http_reason(body)
+    msg = f"HTTP {status}: {reason}"
+    if status == 429:
+        if "daily" in reason.lower():
+            raise DailyQuotaExceeded(msg)
+        raise TransientRequestError(msg, http_status=status)
+    if status >= 500:
+        raise TransientRequestError(msg, http_status=status)
+    raise FatalRequestError(msg)
 
 
 def fetch(session: requests.Session, params: dict[str, str], cfg: MeteoConfig) -> tuple[int, bytes]:
@@ -638,7 +736,8 @@ def fetch(session: requests.Session, params: dict[str, str], cfg: MeteoConfig) -
 
 
 def fetch_with_retry(session, task: DownloadTask, cfg: MeteoConfig,
-                     limiter: RateLimiter, budget: QuotaBudget) -> tuple[int, bytes, int]:
+                     limiter: RateLimiter | None = None,
+                     budget: QuotaBudget | None = None) -> tuple[int, bytes, int]:
     """
     Bucle de reintentos de UNA tarea. Devuelve (status, bytes, attempts).
       for attempt in 1..max_attempts:
@@ -647,8 +746,34 @@ def fetch_with_retry(session, task: DownloadTask, cfg: MeteoConfig,
           classify_response(status, body)
           Transient → sleep(min(cap, base·2^(attempt−1)) + jitter) y continuar
       Agotado → TransientRequestError (la tarea queda FAILED y se reintenta en la próxima corrida).
+    v0.2: budget es opcional (None); la salvaguarda de cuota es el ritmo fijo + el 429 del servidor.
     """
-    raise NotImplementedError
+    params = build_params(task, cfg)
+    weight = request_weight(task, cfg)
+    cod, seg = task.location.cod_mpio, task.segment.name
+    last: TransientRequestError | None = None
+    for attempt in range(1, cfg.max_attempts + 1):
+        if budget is not None and not budget.can_spend(weight):
+            raise DailyQuotaExceeded(f"[{cod}/{seg}] presupuesto local diario agotado")
+        if limiter is not None:
+            limiter.wait()
+        try:
+            status, body = fetch(session, params, cfg)
+            if budget is not None:
+                budget.spend(weight)
+            classify_response(status, body)
+            return status, body, attempt
+        except TransientRequestError as exc:
+            last = exc
+            if attempt == cfg.max_attempts:
+                break
+            delay = min(cfg.backoff_cap_s, cfg.backoff_base_s * 2 ** (attempt - 1))
+            delay += random.uniform(0, 0.1 * delay)
+            log.warning("[%s/%s] intento %d/%d falló (%s); reintento en %.0f s",
+                        cod, seg, attempt, cfg.max_attempts, exc, delay)
+            time.sleep(delay)
+    raise TransientRequestError(f"agotados {cfg.max_attempts} intentos; último: {last}",
+                                attempts=cfg.max_attempts, http_status=last.http_status if last else None)
 
 
 # =============================================================================
@@ -840,8 +965,8 @@ def process_task(session: requests.Session, task: DownloadTask, cfg: MeteoConfig
         invalid → NO se escribe con el nombre final; se guarda en <raw>/_rejected/<cod>_<ts>.json
                   para diagnóstico → DownloadResult(INVALID)
     FatalRequestError y DailyQuotaExceeded se propagan (los maneja run_download).
-    v0.1: limiter y budget son opcionales (None en la prueba de Tunja); un error transitorio
-    (red, 5xx, 429 no diario) devuelve FAILED en lugar de reintentar.
+    v0.2: usa fetch_with_retry (reintentos con backoff para red, 5xx y 429 no diario);
+    agotados los intentos → FAILED. limiter y budget siguen siendo opcionales.
     """
     t0 = time.monotonic()
     params = build_params(task, cfg)
@@ -852,30 +977,19 @@ def process_task(session: requests.Session, task: DownloadTask, cfg: MeteoConfig
     log.info("[%s/%s] GET %s → %s (peso≈%.1f, huella %s)", cod, seg, params["start_date"],
              params["end_date"], weight, fp)
 
-    if limiter is not None:
-        limiter.wait()
     try:
-        status, body = fetch(session, params, cfg)
+        status, body, attempts = fetch_with_retry(session, task, cfg, limiter, budget)
     except TransientRequestError as exc:
+        result.attempts = exc.attempts
+        result.http_status = exc.http_status
         result.error = str(exc)
         result.elapsed_s = time.monotonic() - t0
-        log.warning("[%s/%s] FAILED (red): %s", cod, seg, exc)
+        log.warning("[%s/%s] FAILED: %s", cod, seg, exc)
         return result
-    if budget is not None:
-        budget.spend(weight)
+    except (FatalRequestError, DailyQuotaExceeded) as exc:
+        raise type(exc)(f"[{cod}/{seg}] {exc}") from exc
+    result.attempts = attempts
     result.http_status = status
-
-    # Clasificación mínima v0.1 (v0.2 delega en classify_response)
-    if status != 200:
-        reason = _http_reason(body)
-        result.error = f"HTTP {status}: {reason}"
-        result.elapsed_s = time.monotonic() - t0
-        if status == 400:
-            raise FatalRequestError(f"[{cod}/{seg}] {result.error}")
-        if status == 429 and "daily" in reason.lower():
-            raise DailyQuotaExceeded(f"[{cod}/{seg}] {result.error}")
-        log.warning("[%s/%s] FAILED: %s", cod, seg, result.error)
-        return result
 
     result.bytes = len(body)
     result.sha256 = sha256_bytes(body)
@@ -910,7 +1024,8 @@ def process_task(session: requests.Session, task: DownloadTask, cfg: MeteoConfig
 
 def run_download(cfg: MeteoConfig, segment: Segment, *, only: Iterable[str] | None = None,
                  limit: int | None = None, dry_run: bool = False,
-                 revalidate: bool = False) -> RunSummary:
+                 revalidate: bool = False, require_complete: bool = True,
+                 max_consecutive_failures: int = 3) -> RunSummary:
     """
     Flujo principal (idempotente: ejecutarlo N veces converge al mismo estado final):
 
@@ -931,8 +1046,89 @@ def run_download(cfg: MeteoConfig, segment: Segment, *, only: Iterable[str] | No
       8. Ctrl+C (KeyboardInterrupt): termina la tarea en curso de forma limpia (el .part no se
          promueve), escribe el resumen y sale con exit 130. Volver a ejecutar = reanudar.
       9. Retorna RunSummary (pendientes = FAILED + INVALID + SKIPPED_QUOTA + no intentadas).
+    v0.2: sin QuotaBudget (stub). Salvaguardas: ritmo fijo, 429 diario → parada limpia, y
+    corte tras `max_consecutive_failures` tareas FAILED seguidas (evita quemar cuota a ciegas).
     """
-    raise NotImplementedError
+    t0 = time.monotonic()
+    check_segment_available(segment)
+    locations = load_locations(cfg, require_complete=require_complete)
+    tasks = build_tasks(locations, segment, only)
+    if only and len(tasks) != len(set(only)):
+        missing = sorted(set(only) - {t.location.cod_mpio for t in tasks})
+        raise MeteoError(f"--only: códigos que no están en los centroides: {missing}")
+
+    state = latest_entries(read_manifest(cfg))
+    cached = [t for t in tasks if _is_cached(t, cfg, state, revalidate)]
+    cached_ids = {t.location.cod_mpio for t in cached}
+    pending = [t for t in tasks if t.location.cod_mpio not in cached_ids]
+    if limit is not None:
+        pending = pending[:limit]
+    planned = sum(request_weight(t, cfg) for t in pending)
+    eta_min = len(pending) * cfg.pace_seconds / 60
+    log.info("Tramo %s (%s → %s): %d tareas · %d en caché · %d pendientes · peso≈%.0f llamadas · ETA≈%.0f min",
+             segment.name, segment.start, segment.end, len(tasks), len(cached), len(pending), planned, eta_min)
+    if planned > cfg.daily_budget:
+        log.warning("El peso pendiente (%.0f) supera el presupuesto diario (%.0f): la corrida se cortará "
+                    "por cuota y deberá reanudarse mañana.", planned, cfg.daily_budget)
+
+    by_status: dict[str, int] = {TaskStatus.CACHED.value: len(cached)}
+    summary = RunSummary(segment=segment.name, total=len(tasks), by_status=by_status, weight_spent=0.0,
+                         elapsed_s=0.0, pending=[], planned_weight=planned)
+    if dry_run:
+        by_status[TaskStatus.PLANNED.value] = len(pending)
+        summary.pending = [t.location.cod_mpio for t in pending]
+        summary.elapsed_s = time.monotonic() - t0
+        return summary
+
+    session = make_session(cfg)
+    limiter = RateLimiter(cfg.pace_seconds)
+    not_done = [t.location.cod_mpio for t in pending]
+    consecutive_failures = 0
+    try:
+        for k, task in enumerate(pending, start=1):
+            cod = task.location.cod_mpio
+            fp = params_fingerprint(build_params(task, cfg))
+            try:
+                result = process_task(session, task, cfg, limiter, None)
+            except FatalRequestError as exc:
+                append_manifest(cfg, DownloadResult(task, TaskStatus.FAILED, weight=request_weight(task, cfg),
+                                                    error=str(exc), fingerprint=fp), fp)
+                log.error("ERROR FATAL (se aborta la corrida): %s", exc)
+                summary.stop_reason = "fatal"
+                break
+            except DailyQuotaExceeded as exc:
+                append_manifest(cfg, DownloadResult(task, TaskStatus.SKIPPED_QUOTA, error=str(exc),
+                                                    fingerprint=fp), fp)
+                log.error("Cuota diaria agotada: %s. Reanudar mañana con el mismo comando.", exc)
+                summary.stop_reason = "quota"
+                break
+
+            append_manifest(cfg, result, fp)
+            by_status[result.status.value] = by_status.get(result.status.value, 0) + 1
+            if result.status == TaskStatus.OK:
+                summary.weight_spent += result.weight
+                not_done.remove(cod)
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+            left = len(pending) - k
+            log.info("Progreso %d/%d · %s=%s · restan %d (≈%.0f min) · peso usado≈%.0f",
+                     k, len(pending), cod, result.status.value, left, left * cfg.pace_seconds / 60,
+                     summary.weight_spent)
+            if consecutive_failures >= max_consecutive_failures:
+                log.error("%d tareas fallidas seguidas: se detiene la corrida para no gastar cuota. "
+                          "Revisar el log y reanudar con el mismo comando.", consecutive_failures)
+                summary.stop_reason = "consecutive_failures"
+                break
+    except KeyboardInterrupt:
+        log.warning("Interrumpido por el usuario. Lo descargado queda guardado; reanudar con el mismo comando.")
+        summary.stop_reason = "interrupted"
+    finally:
+        session.close()
+
+    summary.pending = not_done
+    summary.elapsed_s = time.monotonic() - t0
+    return summary
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -941,14 +1137,64 @@ def main(argv: Sequence[str] | None = None) -> int:
     configuración · 3 cuota diaria agotada (reanudar mañana) · 130 interrumpido por el usuario.
     """
     p = argparse.ArgumentParser(prog="firewatch.ingest.meteo", description=__doc__.splitlines()[1])
+    p.add_argument("--settings", default="config/settings.yaml")
     p.add_argument("--tramo", choices=["base", "cola"], default="base")
     p.add_argument("--only", nargs="*", help="cod_mpio específicos (p. ej. 15001)")
     p.add_argument("--limit", type=int, help="máximo de tareas pendientes a procesar")
     p.add_argument("--dry-run", action="store_true", help="plan y presupuesto, sin red")
     p.add_argument("--revalidate", action="store_true", help="re-validar archivos en caché")
     p.add_argument("--validate-only", action="store_true", help="solo validate_dataset")
-    p.parse_args(argv)
-    raise NotImplementedError
+    p.add_argument("--allow-partial", action="store_true", help="no exigir los 123 municipios en los centroides")
+    p.add_argument("--max-fallos-seguidos", type=int, default=3)
+    args = p.parse_args(argv)
+
+    import yaml
+    settings_path = Path(args.settings).resolve()
+    repo_root = settings_path.parent.parent
+    try:
+        settings = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
+        cfg = load_config(settings, base_dir=repo_root)
+    except (OSError, MeteoError, yaml.YAMLError) as exc:
+        logging.basicConfig(level=logging.INFO)
+        log.error("Configuración inválida: %s", exc)
+        return 2
+
+    # Log a consola y a archivo (útil para la corrida nocturna)
+    log_dir = cfg.raw_dir / "_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"meteo_{args.tramo}_{datetime.now():%Y%m%dT%H%M%S}.log"
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    for h in (logging.StreamHandler(), logging.FileHandler(log_file, encoding="utf-8")):
+        h.setFormatter(fmt)
+        root.addHandler(h)
+
+    if args.validate_only:
+        log.error("--validate-only (validate_dataset) aún no está implementado en v0.2")
+        return 2
+
+    try:
+        segment = build_segments(cfg, cfg.cola_start)[args.tramo]
+        summary = run_download(cfg, segment, only=args.only, limit=args.limit, dry_run=args.dry_run,
+                               revalidate=args.revalidate, require_complete=not args.allow_partial,
+                               max_consecutive_failures=args.max_fallos_seguidos)
+    except MeteoError as exc:
+        log.error("%s: %s", type(exc).__name__, exc)
+        return 2
+
+    log.info("=" * 70)
+    log.info("RESUMEN tramo=%s total=%d estados=%s peso usado≈%.0f duración=%.1f min motivo de parada=%s",
+             summary.segment, summary.total, summary.by_status, summary.weight_spent,
+             summary.elapsed_s / 60, summary.stop_reason)
+    if summary.pending:
+        log.info("Pendientes (%d): %s", len(summary.pending), " ".join(summary.pending))
+    log.info("Log completo: %s · Manifiesto: %s", log_file, cfg.manifest_path)
+
+    if args.dry_run:
+        return 0
+    return {"fatal": 2, "quota": 3, "interrupted": 130}.get(summary.stop_reason or "",
+                                                              1 if summary.pending else 0)
 
 
 if __name__ == "__main__":      # obligatorio en Windows (método spawn) y para `python -m`
