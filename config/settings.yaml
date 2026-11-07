@@ -22,6 +22,8 @@ territorio:
 
 rutas:
   raw: data/raw
+  raw_firms: data/raw/firms              # CSV anual por país, 2022–2025 (SP)
+  raw_firms_2026: data/raw/firms_2026    # Archive Download: archive/ (SP) y nrt/ (NRT)
   raw_mgn: data/raw/dane/MGN2025_MPIO_GRAFICO/MGN_ADM_MPIO_GRAFICO.shp
   silver: data/silver
   gold: data/gold
