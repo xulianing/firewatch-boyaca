@@ -45,6 +45,12 @@ firms:
     tamano_celda_grados: 0.005
     anios_fuente: [2022, 2023, 2024, 2025]
   dedup_claves: [latitude, longitude, acq_date, acq_time, satellite]
+  validacion:                       # umbrales de los checks V-C* de L2: alertan o bloquean, NO cambian datos
+    umbral_descarte_rango: 0.01     # V-C10: > 1 % de F2+F3 en un archivo = problema de lectura (bloquea)
+    ratio_n20_n: [0.7, 1.5]         # V-C11: razón anual N20/N (advertencia)
+    tol_salto_sp_nrt: 0.30          # V-C12: mes NRT frente a la media de la línea base (advertencia)
+    sobre_enmascaramiento_max: 0.02 # V-C13c: fracción de SP type 0 dentro de la máscara (advertencia)
+    zona_control: {lat: [5.6, 5.8], lon: [-73.0, -72.8]}   # V-C13: Nobsa–Sogamoso debe quedar enmascarado
 
 meteo:                              # firewatch.ingest.meteo (claves en inglés: las lee load_config)
   base_url: "https://archive-api.open-meteo.com/v1/archive"
