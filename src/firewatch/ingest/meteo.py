@@ -10,10 +10,10 @@ Fuera de alcance (pertenece a otras capas)
     - Calcular centroides            → B3 (silver.dim_municipio). Puente temporal: config/centroides_boyaca.csv
     - Agregar horario → diario       → Spark L3 (build_daily.py).
 
-Pendiente en este módulo (B3)
+Silver (B3)
     - a_silver_horario: JSON → silver/clima_horario (Parquet por anio), con el viento convertido
-      de m/s a km/h (×3,6) según docs/diccionario_datos.md, y la `elevation` devuelta por la API
-      para silver/dim_municipio.
+      de m/s a km/h (×3,6) según docs/diccionario_datos.md.
+    - Pendiente: la `elevation` devuelta por la API para silver/dim_municipio.
 
 Decisiones de diseño (ver Guía B1 §5 y ADR-0003/0004)
     D-M1  Una ubicación por petición: el peso de la cuota escala con las ubicaciones; así la unidad
@@ -46,6 +46,7 @@ Uso (CLI, v0.2)
     python -m firewatch.ingest.meteo --tramo base --limit 5          # primeros 5 pendientes
     python -m firewatch.ingest.meteo --tramo base                    # corrida completa (reanudable)
     python -m firewatch.ingest.meteo --validate-only                 # solo validación de dataset
+    python -m firewatch.ingest.meteo --silver                        # B3: raw → silver/clima_horario
 Prueba de humo de Tunja:
     python scripts/smoke_meteo_tunja.py
 """
@@ -119,6 +120,7 @@ class MeteoConfig:
     expected_n_locations: int = 123
     centroides_path: Path | None = None  # puente temporal: config/centroides_boyaca.csv (prioridad sobre Parquet)
     cola_start: date | None = None      # inicio del tramo 'cola' (D-M6); obligatorio en settings.yaml
+    silver_dir: Path | None = None      # data/silver (rutas.silver) → silver/clima_horario (B3)
 
 
 @dataclass(frozen=True)
@@ -321,6 +323,7 @@ def load_config(settings: dict[str, Any], base_dir: str | Path | None = None) ->
         expected_n_locations=int(m.get("expected_n_locations", 123)),
         centroides_path=path_of("centroides", None),
         cola_start=cola_start,
+        silver_dir=path_of("silver", "data/silver"),
     )
 
     # Coherencia ritmo ↔ cuota (con el tramo base, que es el más pesado)
@@ -944,6 +947,174 @@ def validate_dataset(cfg: MeteoConfig, locations: Sequence[Location],
 
 
 # =============================================================================
+# 9b. Silver (B3): JSON raw → silver/clima_horario
+# =============================================================================
+
+MS_A_KMH = 3.6                      # conversión de unidades (1 m/s = 3,6 km/h), no es un parámetro
+SILVER_NAMES: dict[str, str] = {    # variable Open-Meteo → columna silver (docs/diccionario_datos.md)
+    "temperature_2m": "temp",
+    "relative_humidity_2m": "rh",
+    "precipitation": "precip",
+    "wind_speed_10m": "wind",
+    "et0_fao_evapotranspiration": "et0",
+}
+CLIMA_COLUMNS: tuple[str, ...] = ("cod_mpio", "ts_local", "fecha", "temp", "rh", "precip", "wind", "et0")
+CLIMA_KEY: tuple[str, str] = ("cod_mpio", "ts_local")
+
+
+def _clima_schema():
+    import pyarrow as pa
+    return pa.schema([
+        ("cod_mpio", pa.string()), ("ts_local", pa.timestamp("us")), ("fecha", pa.date32()),
+        ("temp", pa.float64()), ("rh", pa.float64()), ("precip", pa.float64()),
+        ("wind", pa.float64()), ("et0", pa.float64()), ("anio", pa.int16()),
+    ])
+
+
+def hash_clima(df) -> str:
+    """
+    content_sha256 de silver/clima_horario: SHA-256 sobre las 8 columnas del contrato, ordenadas por
+    la clave (cod_mpio, ts_local). Normaliza tipos para que el hash en memoria y el recalculado al
+    releer el Parquet coincidan (ts_local en µs, fecha en días desde la época).
+    """
+    import pandas as pd
+    d = pd.DataFrame({
+        "cod_mpio": df["cod_mpio"].astype(str).to_numpy(dtype=object),
+        "ts_local": df["ts_local"].to_numpy(dtype="datetime64[us]").astype("int64"),
+        "fecha": pd.to_datetime(df["fecha"]).to_numpy(dtype="datetime64[D]").astype("int64"),
+        **{c: df[c].to_numpy(dtype="float64") for c in CLIMA_COLUMNS[3:]},
+    })
+    d = d.sort_values(list(CLIMA_KEY), kind="stable").reset_index(drop=True)
+    return hashlib.sha256(pd.util.hash_pandas_object(d, index=False).to_numpy().tobytes()).hexdigest()
+
+
+def _load_validated(task: DownloadTask, cfg: MeteoConfig,
+                    state: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+    """Lee un JSON raw solo si tiene registro 'ok' vigente en el manifiesto y pasa validate_payload."""
+    cod, seg = task.location.cod_mpio, task.segment.name
+    path = target_path(task, cfg)
+    if not path.exists():
+        raise MeteoError(f"[{cod}/{seg}] falta el archivo raw {path}")
+    if not _is_cached(task, cfg, state, revalidate=False):
+        raise MeteoError(f"[{cod}/{seg}] {path.name} no tiene un registro 'ok' vigente en el manifiesto "
+                         "(huella o sha256 distintos)")
+    payload = json.loads(path.read_bytes())
+    rep = validate_payload(payload, task, cfg)
+    if not rep.ok:
+        raise MeteoError(f"[{cod}/{seg}] validación bloqueante fallida: {rep.errors}")
+    return payload
+
+
+def _frame_municipio(cod_mpio: str, payloads: Sequence[dict[str, Any]], cfg: MeteoConfig):
+    """Concatena los tramos (base → cola) de un municipio y verifica la costura: paso de 1 h exacto."""
+    import pandas as pd
+    parts = []
+    for p in payloads:
+        h = p["hourly"]
+        d = pd.DataFrame({SILVER_NAMES[k]: pd.Series(h[k], dtype="float64") for k in cfg.hourly_vars})
+        d.insert(0, "ts_local", pd.to_datetime(pd.Series(h["time"]), format="%Y-%m-%dT%H:%M")
+                 .astype("datetime64[us]"))
+        parts.append(d)
+    df = pd.concat(parts, ignore_index=True)
+    steps = df["ts_local"].diff().iloc[1:]
+    bad = int((steps != pd.Timedelta(hours=1)).sum())
+    if bad:
+        raise MeteoError(f"[{cod_mpio}] costura base→cola rota: {bad} pasos distintos de 1 h")
+    df.insert(0, "cod_mpio", cod_mpio)
+    return df
+
+
+def _write_clima(df, root: Path) -> None:
+    """Escribe Parquet particionado por anio (Hive) con reemplazo atómico del directorio (idempotente)."""
+    import shutil
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pa.Table.from_pandas(df[[*CLIMA_COLUMNS, "anio"]], schema=_clima_schema(), preserve_index=False)
+    tmp, old = root.with_name(root.name + ".tmp"), root.with_name(root.name + ".old")
+    for p in (tmp, old):
+        if p.exists():
+            shutil.rmtree(p)
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_to_dataset(table, root_path=str(tmp), partition_cols=["anio"],
+                        basename_template="part-{i}.parquet")
+    if root.exists():
+        root.rename(old)
+    tmp.rename(root)
+    if old.exists():
+        shutil.rmtree(old)
+
+
+def a_silver_horario(cfg: MeteoConfig, locations: Sequence[Location] | None = None) -> dict[str, Any]:
+    """
+    B3: JSON raw de Open-Meteo (tramos base + cola) → silver/clima_horario.
+
+    Contrato (docs/diccionario_datos.md): cod_mpio (texto), ts_local (timestamp en µs SIN zona,
+    hora local America/Bogota), fecha, temp, rh, precip, wind (km/h = m/s × 3,6), et0.
+    Parquet particionado por `anio` (Hive). Clave única (cod_mpio, ts_local).
+
+    Falla (MeteoError, sin escribir nada) si: falta un archivo, no tiene registro 'ok' vigente en el
+    manifiesto, no pasa validate_payload, la costura base→cola no es continua, hay claves duplicadas
+    o el total de filas ≠ n_municipios × horas de la ventana.
+    Devuelve el reporte (también en silver/_reports/clima_horario.json).
+    """
+    if cfg.silver_dir is None:
+        raise MeteoError("settings.yaml: falta 'rutas.silver'")
+    import pandas as pd
+
+    locations = list(locations) if locations is not None else load_locations(cfg)
+    cods = [loc.cod_mpio for loc in locations]
+    dup = sorted({c for c in cods if cods.count(c) > 1})
+    if dup:
+        raise MeteoError(f"cod_mpio duplicados en las ubicaciones: {dup}")
+
+    segs = build_segments(cfg)
+    order = (segs["base"], segs["cola"])
+    h_total = sum(s.n_hours for s in order)
+    state = latest_entries(read_manifest(cfg))
+
+    frames = []
+    for loc in locations:
+        payloads = [_load_validated(DownloadTask(loc, s), cfg, state) for s in order]
+        frames.append(_frame_municipio(loc.cod_mpio, payloads, cfg))
+    df = pd.concat(frames, ignore_index=True)
+    df["wind"] = df["wind"] * MS_A_KMH
+    df["fecha"] = df["ts_local"].dt.date
+    df["anio"] = df["ts_local"].dt.year.astype("int16")
+
+    n_exp = len(locations) * h_total
+    if len(df) != n_exp:
+        raise MeteoError(f"filas = {len(df)} ≠ esperado {len(locations)} × {h_total} = {n_exp}")
+    n_dup = int(df.duplicated(list(CLIMA_KEY)).sum())
+    if n_dup:
+        raise MeteoError(f"{n_dup} claves (cod_mpio, ts_local) duplicadas")
+
+    df = df.sort_values(list(CLIMA_KEY), kind="stable").reset_index(drop=True)
+    sha = hash_clima(df)
+    out = cfg.silver_dir / "clima_horario"
+    _write_clima(df, out)
+
+    report = {
+        "tabla": "silver/clima_horario",
+        "ts_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "n_municipios": len(locations),
+        "horas_por_municipio": h_total,
+        "n_filas": int(len(df)),
+        "filas_por_anio": {int(k): int(v) for k, v in df["anio"].value_counts().sort_index().items()},
+        "ts_min": str(df["ts_local"].min()),
+        "ts_max": str(df["ts_local"].max()),
+        "tramos": {s.name: [s.start.isoformat(), s.end.isoformat(), s.n_hours] for s in order},
+        "content_sha256": sha,
+        "path": str(out),
+    }
+    write_atomic(cfg.silver_dir / "_reports" / "clima_horario.json",
+                 json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8"))
+    log.info("silver/clima_horario: %d filas (%s) · content_sha256=%s",
+             report["n_filas"], report["filas_por_anio"], sha)
+    return report
+
+
+# =============================================================================
 # 10. Orquestación
 # =============================================================================
 
@@ -1146,6 +1317,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--validate-only", action="store_true", help="solo validate_dataset")
     p.add_argument("--allow-partial", action="store_true", help="no exigir los 123 municipios en los centroides")
     p.add_argument("--max-fallos-seguidos", type=int, default=3)
+    p.add_argument("--silver", action="store_true", help="B3: JSON raw → silver/clima_horario (sin red)")
     args = p.parse_args(argv)
 
     import yaml
@@ -1173,6 +1345,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.validate_only:
         log.error("--validate-only (validate_dataset) aún no está implementado en v0.2")
         return 2
+
+    if args.silver:
+        try:
+            a_silver_horario(cfg)
+        except MeteoError as exc:
+            log.error("%s: %s", type(exc).__name__, exc)
+            return 2
+        return 0
 
     try:
         segment = build_segments(cfg, cfg.cola_start)[args.tramo]
