@@ -16,7 +16,6 @@ import pytest
 
 pyspark = pytest.importorskip("pyspark")
 
-from pyspark.sql import Row  # noqa: E402
 from pyspark.sql import functions as F  # noqa: E402
 from pyspark.sql import types as T  # noqa: E402
 
@@ -52,9 +51,10 @@ ESQ_DET = T.StructType([
 def cfg_prueba(base: Path) -> dict:
     return {
         "rutas": {"silver": str(base / "silver"), "intermedio": str(base / "int")},
-       "ventana": {"fecha_inicio": INI.isoformat(), "fecha_fin": FIN.isoformat()},
-      "territorio": {"cod_dpto_foco": "15"},
-        "spark": {"master_produccion": "local[2]", "shuffle_partitions_produccion": 4, "driver_memory": "1g","ventana_precip_dias": 3, "umbral_dia_seco_mm": 1.0}, 
+        "ventana": {"fecha_inicio": INI.isoformat(), "fecha_fin": FIN.isoformat()},
+        "territorio": {"cod_dpto_foco": "15"},
+        "spark": {"master_produccion": "local[2]", "shuffle_partitions_produccion": 4,
+                  "driver_memory": "1g", "ventana_precip_dias": 3, "umbral_dia_seco_mm": 1.0},
     }
 
 
@@ -63,8 +63,27 @@ def spark():
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
     s = crear_sesion(cfg_prueba(Path(".")))
+    s.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
+    s.conf.set("spark.sql.execution.arrow.pyspark.fallback.enabled", "false")
     yield s
     s.stop()
+
+
+def crear_df(spark, filas, esquema):
+    """Crea un DataFrame sin workers de Python (pandas + Arrow → JVM).
+
+    En el PC de ejecución (Windows + Python 3.12 + PySpark 3.5) los workers de Python
+    mueren al arrancar ("Python worker exited unexpectedly"). El código de producción no
+    los usa; los tests tampoco deben depender de ellos.
+    """
+    import pandas as pd
+
+    st = esquema if isinstance(esquema, T.StructType) else T._parse_datatype_string(esquema)
+    if not filas:  # vacío: se construye en la JVM, sin datos que transferir
+        return spark.range(0).select(
+            *[F.lit(None).cast(f.dataType).alias(f.name) for f in st.fields])
+    pdf = pd.DataFrame([tuple(f) for f in filas], columns=[f.name for f in st.fields])
+    return spark.createDataFrame(pdf, schema=st)
 
 
 def params(base: Path = Path("."), **kw) -> bd.Params:
@@ -107,14 +126,14 @@ def filas_detecciones() -> list[tuple]:
 
 def escribir_silver(spark, base: Path, horarias=None, detecciones=None) -> None:
     s = base / "silver"
-    h = spark.createDataFrame(horarias if horarias is not None else filas_horarias(), ESQ_H)
+    h = crear_df(spark, horarias if horarias is not None else filas_horarias(), ESQ_H)
     h.write.mode("overwrite").partitionBy("anio").parquet(str(s / "clima_horario"))
-    det = spark.createDataFrame(
+    det = crear_df(spark,
         detecciones if detecciones is not None else filas_detecciones(), ESQ_DET)
     det.write.mode("overwrite").partitionBy("anio").parquet(str(s / "detecciones"))
-    spark.createDataFrame([Row(cod_mpio=m) for m in MPIOS]).write.mode("overwrite") \
+    crear_df(spark, [(m,) for m in MPIOS], "cod_mpio string").write.mode("overwrite") \
         .parquet(str(s / "dim_municipio"))
-    spark.createDataFrame([Row(cod_dpto=d) for d in DPTOS]).write.mode("overwrite") \
+    crear_df(spark, [(d,) for d in DPTOS], "cod_dpto string").write.mode("overwrite") \
         .parquet(str(s / "dim_departamento"))
 
 
@@ -126,7 +145,7 @@ def test_clima_diario_agregaciones(spark):
     filas = [("15001", None, dia, None, 10.0 + h, 50.0 + h, 0.1, float(h), 0.01) for h in range(24)]
     esq = "cod_mpio string, ts_local string, fecha date, dia_ts date, temp double, rh double, " \
           "precip double, wind double, et0 double"
-    r = bd.clima_diario(spark.createDataFrame(filas, esq)).first()
+    r = bd.clima_diario(crear_df(spark, filas, esq)).first()
     assert r["tmax"] == 33.0
     assert r["tmean"] == pytest.approx(21.5)
     assert r["precip"] == pytest.approx(2.4)
@@ -138,7 +157,7 @@ def test_clima_diario_agregaciones(spark):
 
 def test_clima_diario_esquema(spark):
     esq = "cod_mpio string, fecha date, temp double, rh double, precip double, wind double, et0 double"
-    df = bd.clima_diario(spark.createDataFrame([("15001", date(2024, 1, 1), 1.0, 1.0, 1.0, 1.0, 1.0)], esq))
+    df = bd.clima_diario(crear_df(spark, [("15001", date(2024, 1, 1), 1.0, 1.0, 1.0, 1.0, 1.0)], esq))
     assert df.columns == bd.COLS_CLIMA_DIARIO
     tipos = dict(df.dtypes)
     assert tipos["cod_mpio"] == "string" and tipos["fecha"] == "date" and tipos["n_horas"] == "int"
@@ -146,7 +165,7 @@ def test_clima_diario_esquema(spark):
 
 
 def test_detecciones_boyaca_filtra_estaticas_otros_dptos_y_nulos(spark):
-    det = spark.createDataFrame(filas_detecciones(), ESQ_DET)
+    det = crear_df(spark, filas_detecciones(), ESQ_DET)
     out = bd.detecciones_boyaca(det, params())
     assert out.count() == 3
     assert out.agg(F.sum("frp")).first()[0] == 35.0
@@ -156,14 +175,14 @@ def _clima_sintetico(spark, mpio="15001", n=10, lluvia=None):
     lluvia = lluvia or [0.0] * n
     filas = [(mpio, INI + timedelta(days=d), 20.0, 15.0, lluvia[d], 50.0, 5.0, 2.0)
              for d in range(n)]
-    return spark.createDataFrame(
+    return crear_df(spark,
         filas, "cod_mpio string, fecha date, tmax double, tmean double, precip double, "
                "rh_min double, wind_max double, et0 double")
 
 
 def test_municipio_dia_rellena_ceros_y_cuenta(spark):
     clima = _clima_sintetico(spark, n=5)
-    det = spark.createDataFrame(
+    det = crear_df(spark,
         [("15001", INI + timedelta(days=1), 10.0), ("15001", INI + timedelta(days=1), 2.5)],
         "cod_mpio string, fecha date, frp double")
     md = bd.municipio_dia(clima, det, params()).orderBy("fecha").collect()
@@ -175,7 +194,7 @@ def test_municipio_dia_rellena_ceros_y_cuenta(spark):
 
 def test_precip_30d_ventana_y_nulos_iniciales(spark):
     clima = _clima_sintetico(spark, n=6, lluvia=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-    vacio = spark.createDataFrame([], "cod_mpio string, fecha date, frp double")
+    vacio = crear_df(spark, [], "cod_mpio string, fecha date, frp double")
     md = bd.municipio_dia(clima, vacio, params(ventana_precip=3)).orderBy("fecha").collect()
     assert [r["precip_30d"] for r in md] == [None, None, 6.0, 9.0, 12.0, 15.0]
 
@@ -184,7 +203,7 @@ def test_rachas_secas_gaps_and_islands(spark):
     # S S H S S S H  (S = seco < 1 mm, H = húmedo)
     lluvia = [0.0, 0.5, 5.0, 0.0, 0.0, 0.9, 3.0]
     clima = _clima_sintetico(spark, n=7, lluvia=lluvia)
-    vacio = spark.createDataFrame([], "cod_mpio string, fecha date, frp double")
+    vacio = crear_df(spark, [], "cod_mpio string, fecha date, frp double")
     md = bd.municipio_dia(clima, vacio, params()).orderBy("fecha").collect()
     assert [r["dia_seco"] for r in md] == [True, True, False, True, True, True, False]
     ids = [r["id_racha"] for r in md]
@@ -196,8 +215,8 @@ def test_rachas_secas_gaps_and_islands(spark):
 
 def test_agg_depto_mes_grilla_completa_con_ceros(spark):
     p = params()
-    det = spark.createDataFrame(filas_detecciones(), ESQ_DET)
-    dpto = spark.createDataFrame([Row(cod_dpto=d) for d in DPTOS])
+    det = crear_df(spark, filas_detecciones(), ESQ_DET)
+    dpto = crear_df(spark, [(d,) for d in DPTOS], "cod_dpto string")
     ad = bd.agg_depto_mes(det, dpto, bd.meses_ventana(spark, p), p)
     assert ad.count() == len(DPTOS) * p.n_meses == 4
     assert ad.columns == bd.COLS_AGG_DEPTO_MES
@@ -212,7 +231,7 @@ def test_huella_invariante_al_particionado(spark):
     esq = "cod_mpio string, fecha date, temp double, rh double, precip double, wind double, et0 double"
     filas = [(m, INI + timedelta(days=d), 10.0 + h / 7, 50.0, 0.1 / 3, 1.0, 0.01 / 3)
              for m in MPIOS for d in range(20) for h in range(24)]
-    h = spark.createDataFrame(filas, esq)
+    h = crear_df(spark, filas, esq)
     huellas = []
     for n in (1, 3, 7):
         spark.conf.set("spark.sql.shuffle.partitions", str(n))
