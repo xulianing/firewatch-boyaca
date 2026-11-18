@@ -27,6 +27,7 @@ rutas:
   raw_mgn: data/raw/dane/MGN2025_MPIO_GRAFICO/MGN_ADM_MPIO_GRAFICO.shp
   silver: data/silver
   gold: data/gold
+  intermedio: data/int
   benchmarks_resultados: benchmarks/results
   benchmarks_figuras: benchmarks/figures
   provincias_csv: config/provincias_boyaca.csv
