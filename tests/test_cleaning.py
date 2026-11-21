@@ -313,6 +313,37 @@ def test_build_static_mask_type2_only_no_min_no_dilation(tmp_path):
     assert sorted(table["n_det"].tolist()) == [1, 2]
 
 
+
+def test_build_static_mask_persistencia(tmp_path):
+    """ADR-0005: celda con SP type 0 en >= meses_min meses y >= anios_min años entra a la máscara."""
+    s = settings_for(tmp_path)
+    s["firms"]["mascara_estatica"]["anios_fuente"] = [2024, 2025]
+    s["firms"]["mascara_estatica"]["persistencia"] = {"meses_min": 4, "anios_min": 2}
+    cfg = cl.load_config(s, base_dir=tmp_path)
+    horno = [row(5.4786, -73.5139, d) for d in ("2024-02-01", "2024-06-01", "2025-03-01", "2025-09-01")]
+    quema = [row(6.0012, -72.0012, d) for d in ("2024-01-05", "2024-01-20", "2025-01-10", "2025-01-25")]
+    un_anio = [row(7.0012, -71.0012, d) for d in ("2025-01-01", "2025-03-01", "2025-05-01", "2025-07-01")]
+    baja = [row(4.5012, -74.0012, d, conf="l") for d in ("2024-02-01", "2024-06-01", "2025-03-01", "2025-09-01")]
+    viejo = [row(4.4012, -74.1012, d) for d in ("2023-02-01", "2023-06-01", "2024-03-01", "2025-09-01")]
+    est = [row(5.7701, -72.9401, "2025-11-01", typ=2)] + [row(5.7702, -72.9402, d) for d in
+                                                         ("2024-02-01", "2024-06-01", "2025-03-01", "2025-09-01")]
+    raw = pd.DataFrame(horno + quema + un_anio + baja + viejo + est).astype({"acq_time": "string"})
+    cells, table = cl.build_static_mask(cl.normalize(raw), cfg)
+    crit = dict(zip(table["celda_id"], table["criterio"]))
+    c_horno = cl.cell_ids([5.4786], [-73.5139], 0.005)[0]
+    c_est = cl.cell_ids([5.7701], [-72.9401], 0.005)[0]
+    assert crit == {c_horno: "persistencia", c_est: "type2"}     # quema (2 meses), un año, conf l, 3 meses en fuente: fuera
+    assert list(cells) == sorted(crit)
+
+
+def test_persistencia_desactivada_sin_clave_y_parametros_validos(tmp_path):
+    cfg = cl.load_config(settings_for(tmp_path), base_dir=tmp_path)
+    assert (cfg.persist_meses_min, cfg.persist_anios_min) == (0, 0)
+    s = settings_for(tmp_path)
+    s["firms"]["mascara_estatica"]["persistencia"] = {"meses_min": 6}
+    with pytest.raises(cl.FirmsError, match="persistencia"):
+        cl.load_config(s, base_dir=tmp_path)
+
 # =============================================================================
 # Fase 1: reglas
 # =============================================================================
