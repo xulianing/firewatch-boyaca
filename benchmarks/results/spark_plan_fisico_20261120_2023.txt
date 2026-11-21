@@ -1,0 +1,47 @@
+== Physical Plan ==
+* HashAggregate (7)
++- Exchange (6)
+   +- * HashAggregate (5)
+      +- * Project (4)
+         +- * Filter (3)
+            +- * ColumnarToRow (2)
+               +- Scan parquet  (1)
+
+
+(1) Scan parquet 
+Output [8]: [cod_mpio#0, fecha#2, temp#3, rh#4, precip#5, wind#6, et0#7, anio#8]
+Batched: true
+Location: InMemoryFileIndex [file:/C:/Users/cris6/firewatch-boyaca/data/silver/clima_horario]
+PushedFilters: [IsNotNull(fecha), GreaterThanOrEqual(fecha,2022-01-01), LessThanOrEqual(fecha,2026-10-31)]
+ReadSchema: struct<cod_mpio:string,fecha:date,temp:double,rh:double,precip:double,wind:double,et0:double>
+
+(2) ColumnarToRow [codegen id : 1]
+Input [8]: [cod_mpio#0, fecha#2, temp#3, rh#4, precip#5, wind#6, et0#7, anio#8]
+
+(3) Filter [codegen id : 1]
+Input [8]: [cod_mpio#0, fecha#2, temp#3, rh#4, precip#5, wind#6, et0#7, anio#8]
+Condition : ((isnotnull(fecha#2) AND (fecha#2 >= 2022-01-01)) AND (fecha#2 <= 2026-10-31))
+
+(4) Project [codegen id : 1]
+Output [7]: [cod_mpio#0, fecha#2, temp#3, rh#4, precip#5, wind#6, et0#7]
+Input [8]: [cod_mpio#0, fecha#2, temp#3, rh#4, precip#5, wind#6, et0#7, anio#8]
+
+(5) HashAggregate [codegen id : 1]
+Input [7]: [cod_mpio#0, fecha#2, temp#3, rh#4, precip#5, wind#6, et0#7]
+Keys [2]: [cod_mpio#0, fecha#2]
+Functions [7]: [partial_max(temp#3), partial_avg(temp#3), partial_sum(precip#5), partial_min(rh#4), partial_max(wind#6), partial_sum(et0#7), partial_count(1)]
+Aggregate Attributes [8]: [max#154, sum#155, count#156L, sum#157, min#158, max#159, sum#160, count#161L]
+Results [10]: [cod_mpio#0, fecha#2, max#162, sum#163, count#164L, sum#165, min#166, max#167, sum#168, count#169L]
+
+(6) Exchange
+Input [10]: [cod_mpio#0, fecha#2, max#162, sum#163, count#164L, sum#165, min#166, max#167, sum#168, count#169L]
+Arguments: hashpartitioning(cod_mpio#0, fecha#2, 8), ENSURE_REQUIREMENTS, [plan_id=79]
+
+(7) HashAggregate [codegen id : 2]
+Input [10]: [cod_mpio#0, fecha#2, max#162, sum#163, count#164L, sum#165, min#166, max#167, sum#168, count#169L]
+Keys [2]: [cod_mpio#0, fecha#2]
+Functions [7]: [max(temp#3), avg(temp#3), sum(precip#5), min(rh#4), max(wind#6), sum(et0#7), count(1)]
+Aggregate Attributes [7]: [max(temp#3)#122, avg(temp#3)#124, sum(precip#5)#126, min(rh#4)#128, max(wind#6)#130, sum(et0#7)#132, count(1)#134L]
+Results [9]: [cod_mpio#0, fecha#2, max(temp#3)#122 AS tmax#123, avg(temp#3)#124 AS tmean#125, sum(precip#5)#126 AS precip#127, min(rh#4)#128 AS rh_min#129, max(wind#6)#130 AS wind_max#131, sum(et0#7)#132 AS et0#133, cast(count(1)#134L as int) AS n_horas#135]
+
+
