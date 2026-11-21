@@ -1,5 +1,5 @@
 """
-firewatch.parallel.runner — Orquestador de L2 (versión SECUENCIAL).
+firewatch.parallel.runner — Orquestador de L2 (secuencial y paralelo con multiprocessing).
 
 Base: firewatch_l2_secuencial_v0.1 (5 nov 2026). La limpieza aplica la política congelada de CLAUDE.md §4
 (ver firewatch.parallel.cleaning).
@@ -9,18 +9,20 @@ Base: firewatch_l2_secuencial_v0.1 (5 nov 2026). La limpieza aplica la política
     Plan:              bloques de ~bloque_filas filas, cortados SIEMPRE en cambio de (satélite, fecha),
                        ordenados de mayor a menor (LPT)
     Fase 1:            por bloque, en la MISMA tarea: clean_chunk → spatial_join
-                       (hoy un bucle; la versión con multiprocessing solo reemplazará el ejecutor del map)
+                       p = 1: bucle secuencial (línea base) · p > 1: Pool spawn con initializer
+                       (contexto + polígonos una vez por worker) e imap_unordered en orden LPT
     Reducción:         Σ CleaningMetrics → V-C7…V-C12, V-C14 + V-SJ1…V-SJ3
     Escritura:         solo si no hay fallos bloqueantes → silver/detecciones (Hive por anio) y, como
                        auditoría, silver/_reports/{mascara_fuentes_estaticas.parquet, cleaning_metrics.json}
 
 Uso:
-    python -m firewatch.parallel.runner                       # corrida completa
+    python -m firewatch.parallel.runner                       # corrida completa (paralelo.procesos_produccion)
+    python -m firewatch.parallel.runner --procesos 1          # línea base secuencial
     python -m firewatch.parallel.runner --solo-fase0          # valida, construye la máscara y muestra el plan
     python -m firewatch.parallel.runner --bloque-filas 20000  # otro tamaño de bloque (la salida no cambia)
 
-API para run_pipeline y benchmarks: ejecutar_silver(n_procesos). Hoy solo admite n_procesos = 1
-(línea base); la versión con multiprocessing reemplazará únicamente el ejecutor del map de la Fase 1.
+API para run_pipeline y benchmarks: ejecutar_silver(n_procesos). Con cualquier n_procesos la salida es
+idéntica (mismo content_sha256): solo cambia el ejecutor del map de la Fase 1.
 
 Códigos de salida: 0 ok · 1 validación bloqueante fallida (no se publica nada) · 2 configuración/lectura.
 Requiere pyarrow ≥ 10 (escritura particionada) y GeoPandas (cruce espacial).
@@ -31,6 +33,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import multiprocessing as mp
+import os
 import shutil
 import sys
 import time
@@ -125,22 +129,158 @@ def _write_parquet(df: pd.DataFrame, dest: Path) -> None:
 def _write_report(path: Path, report: dict[str, Any]) -> None:
     write_atomic(path, json.dumps(report, ensure_ascii=False, indent=2, default=str).encode("utf-8"))
 
+# =============================================================================
+# Fase 1 en paralelo: estado por worker (multiprocessing, método spawn)
+# =============================================================================
+# Cada proceso hijo tiene su propia copia de estas variables. Las llena _iniciar_worker
+# una sola vez al crear el Pool, para no serializar el contexto ni los polígonos en cada tarea.
+_W_CTX: cl.CleaningContext | None = None
+_W_POLYS: Any = None
+_W_JOINER: Callable[[pd.DataFrame, Any], pd.DataFrame] | None = None
+_W_T_ARRANQUE: float = 0.0          # segundos que tardó _iniciar_worker en este proceso (perfil)
+_W_T_SPAWN: float = 0.0             # segundos desde que el padre creó el Pool hasta que este hijo arrancó
+
+
+def _iniciar_worker(ctx: cl.CleaningContext, geo_path: Path,
+                    polygons_loader: Callable[[Path], Any],
+                    joiner: Callable[[pd.DataFrame, Any], pd.DataFrame], t_pool: float = 0.0) -> None:
+    """Initializer del Pool: se ejecuta UNA vez en cada proceso hijo. Mide su propia duración (perfil).
+
+    t_pool es el reloj de pared (time.time) del padre al crear el Pool: la diferencia con el momento en que
+    arranca este hijo es la latencia de spawn (crear el intérprete y reimportar los módulos).
+    """
+    global _W_CTX, _W_POLYS, _W_JOINER, _W_T_ARRANQUE, _W_T_SPAWN
+    _W_T_SPAWN = max(0.0, time.time() - t_pool) if t_pool else 0.0
+    t0 = time.perf_counter()
+    _W_CTX = ctx
+    _W_POLYS = polygons_loader(geo_path)
+    _W_JOINER = joiner
+    _W_T_ARRANQUE = time.perf_counter() - t0
+
+
+def _procesar_bloque(df: pd.DataFrame) -> tuple[pd.DataFrame, cl.CleaningMetrics, int, dict[str, Any]]:
+    """Tarea del Pool: limpieza + cruce espacial de UN bloque (mismo código que la versión secuencial).
+
+    Devuelve (bloque unido, métricas del bloque, filas limpias que entraron al cruce, medición de la tarea).
+    La medición se toma DENTRO del proceso hijo: separa el cómputo real del costo de comunicación.
+    """
+    t0 = time.perf_counter()
+    clean, m = cl.clean_chunk(df, _W_CTX)
+    unido = _W_JOINER(clean, _W_POLYS)
+    med = {"pid": os.getpid(), "t_tarea": time.perf_counter() - t0, "t_arranque": _W_T_ARRANQUE,
+           "t_spawn": _W_T_SPAWN, "filas": len(df)}
+    return unido, m, len(clean), med
+
+
+def resumir_perfil(mediciones: list[dict[str, Any]], t_pared: float, n_procesos: int) -> dict[str, Any]:
+    """
+    Perfil de la Fase 1 a partir de las mediciones por tarea (tomadas dentro de cada proceso).
+      suma_tareas_s     Σ tiempo de cómputo de todas las tareas. Si con p procesos supera mucho al de p = 1,
+                        cada proceso calcula más lento (competencia por frecuencia, caché o memoria).
+      spawn_max_s       Latencia de spawn más alta: del Pool() del padre al inicio del hijo (intérprete + imports).
+      arranque_max_s    El inicializador más lento (carga de contexto y polígonos, después del spawn).
+      desbalance        Carga del proceso más ocupado ÷ carga media (1 = reparto perfecto).
+      ocupacion         Σ tareas ÷ (p × tiempo de pared): fracción del tiempo en que los procesos calcularon.
+    """
+    if not mediciones:
+        return {}
+    por_pid: dict[int, float] = {}
+    arranques: dict[int, float] = {}
+    spawns: dict[int, float] = {}
+    for med in mediciones:
+        por_pid[med["pid"]] = por_pid.get(med["pid"], 0.0) + med["t_tarea"]
+        arranques[med["pid"]] = med["t_arranque"]
+        spawns[med["pid"]] = med.get("t_spawn", 0.0)
+    cargas = list(por_pid.values())
+    suma = sum(cargas)
+    tareas = [med["t_tarea"] for med in mediciones]
+    return {
+        "n_tareas": len(mediciones),
+        "procesos_con_trabajo": len(por_pid),
+        "suma_tareas_s": round(suma, 3),
+        "tarea_min_s": round(min(tareas), 3),
+        "tarea_max_s": round(max(tareas), 3),
+        "spawn_max_s": round(max(spawns.values()), 3),
+        "arranque_max_s": round(max(arranques.values()), 3),
+        "desbalance": round(max(cargas) / (suma / len(cargas)), 3),
+        "ocupacion": round(suma / (n_procesos * t_pared), 3) if t_pared > 0 else None,
+    }
+
+
 
 # =============================================================================
 # Orquestación
 # =============================================================================
 
+def ejecutar_fase1(norm: pd.DataFrame, chunks: list[np.ndarray], ctx: cl.CleaningContext, geo_path: Path,
+                   n_procesos: int, polygons_loader: Callable[[Path], Any],
+                   joiner: Callable[[pd.DataFrame, Any], pd.DataFrame],
+                   polys: Any = None) -> tuple[list[pd.DataFrame], cl.CleaningMetrics, int, dict[str, Any]]:
+    """
+    Fase 1 (limpieza + cruce espacial) sobre los bloques dados. ÚNICA implementación: la usan run() y el
+    benchmark de escalado débil, así que el benchmark mide exactamente el código de producción.
+
+    p = 1 → bucle secuencial (línea base). p > 1 → Pool spawn: initializer carga contexto y polígonos una
+    vez por worker; imap_unordered reparte los bloques (en el orden recibido, LPT) a medida que se liberan.
+    Devuelve (bloques unidos en orden de llegada, Σ métricas, filas limpias que entraron al cruce,
+    perfil de la fase: ver resumir_perfil).
+    """
+    parts: list[pd.DataFrame] = []
+    metrics = cl.CleaningMetrics()
+    n_join_in = 0
+    mediciones: list[dict[str, Any]] = []
+    t_inicio = time.perf_counter()
+    if n_procesos == 1:
+        t_arr = 0.0
+        if polys is None:
+            t0 = time.perf_counter()
+            polys = polygons_loader(geo_path)
+            t_arr = time.perf_counter() - t0
+        for k, idx in enumerate(chunks, start=1):
+            t0 = time.perf_counter()
+            clean, m = cl.clean_chunk(norm.iloc[idx], ctx)
+            n_join_in += len(clean)
+            parts.append(joiner(clean, polys))
+            mediciones.append({"pid": os.getpid(), "t_tarea": time.perf_counter() - t0, "t_arranque": t_arr,
+                               "filas": len(idx)})
+            metrics = metrics + m
+            if k % 10 == 0 or k == len(chunks):
+                log.info("Bloques %d/%d · filas limpias acumuladas %d", k, len(chunks), n_join_in)
+        return parts, metrics, n_join_in, resumir_perfil(mediciones, time.perf_counter() - t_inicio, 1)
+
+    bloques = (norm.iloc[idx] for idx in chunks)
+    ctx_mp = mp.get_context("spawn")          # explícito: igual en Windows y en Linux (tests, CI)
+    with ctx_mp.Pool(processes=n_procesos, initializer=_iniciar_worker,
+                     initargs=(ctx, geo_path, polygons_loader, joiner, time.time())) as pool:
+        for k, (unido, m, n, med) in enumerate(pool.imap_unordered(_procesar_bloque, bloques, chunksize=1),
+                                               start=1):
+            parts.append(unido)
+            metrics = metrics + m
+            n_join_in += n
+            mediciones.append(med)
+            if k % 10 == 0 or k == len(chunks):
+                log.info("Bloques %d/%d (p=%d) · filas limpias acumuladas %d", k, len(chunks), n_procesos, n_join_in)
+    return parts, metrics, n_join_in, resumir_perfil(mediciones, time.perf_counter() - t_inicio, n_procesos)
+
+
 def run(cfg: cl.FirmsConfig, *, solo_fase0: bool = False, bloque_filas: int | None = None,
         polygons_loader: Callable[[Path], Any] | None = None,
-        joiner: Callable[[pd.DataFrame, Any], pd.DataFrame] | None = None) -> dict[str, Any]:
+        joiner: Callable[[pd.DataFrame, Any], pd.DataFrame] | None = None,
+        n_procesos: int = 1) -> dict[str, Any]:
     """
-    Ejecuta L2 en modo secuencial. `polygons_loader` y `joiner` permiten inyectar dobles en tests;
+    Ejecuta L2 con n_procesos (1 = línea base secuencial; >1 = Pool spawn en la Fase 1).
+    `polygons_loader` y `joiner` permiten inyectar dobles en tests (en paralelo deben ser funciones
+    a nivel de módulo, porque se envían a los workers por nombre);
     por defecto son spatial_join.load_polygons y spatial_join.spatial_join.
     Lanza RunnerValidationError (tras escribir el informe) si falla un check bloqueante.
     """
+    if n_procesos < 1:
+        raise ValueError(f"n_procesos debe ser ≥ 1 (recibido {n_procesos})")
+
     lg = CheckLog()
     t: dict[str, float] = {}
-    report: dict[str, Any] = {"etapa": "cleaning+spatial_join", "modo": "secuencial",
+    report: dict[str, Any] = {"etapa": "cleaning+spatial_join",
+                              "modo": "secuencial" if n_procesos == 1 else "paralelo", "n_procesos": n_procesos,
                               "generado_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
     t0 = time.perf_counter()
@@ -175,22 +315,17 @@ def run(cfg: cl.FirmsConfig, *, solo_fase0: bool = False, bloque_filas: int | No
         from firewatch.parallel import spatial_join as sj
         polygons_loader = polygons_loader or sj.load_polygons
         joiner = joiner or sj.spatial_join
+    polys = None
     t0 = time.perf_counter()
-    polys = polygons_loader(cfg.geo_path)
+    if n_procesos == 1:
+        polys = polygons_loader(cfg.geo_path)   # en paralelo los carga cada worker (_iniciar_worker)
     t["carga_poligonos_s"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    parts: list[pd.DataFrame] = []
-    metrics = cl.CleaningMetrics()
-    n_join_in = 0
-    for k, idx in enumerate(chunks, start=1):
-        clean, m = cl.clean_chunk(norm.iloc[idx], ctx)
-        n_join_in += len(clean)
-        parts.append(joiner(clean, polys))
-        metrics = metrics + m
-        if k % 10 == 0 or k == len(chunks):
-            log.info("Bloques %d/%d · filas limpias acumuladas %d", k, len(chunks), n_join_in)
+    parts, metrics, n_join_in, perfil = ejecutar_fase1(norm, chunks, ctx, cfg.geo_path, n_procesos,
+                                                       polygons_loader, joiner, polys=polys)
     t["fase1_s"] = time.perf_counter() - t0
+    report["perfil_fase1"] = perfil
 
     t0 = time.perf_counter()
     df = (pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=list(SILVER_COLUMNS) + ["_archivo"]))
@@ -236,10 +371,8 @@ def ejecutar_silver(n_procesos: int = 1, settings_path: str | Path = "config/set
     Punto de entrada de L2 para run_pipeline y los benchmarks: mismo código de producción, solo cambia
     n_procesos. Devuelve el informe (tiempos por fase, conteos, hash de contenido).
     """
-    if n_procesos != 1:
-        raise NotImplementedError("L2 paralelo (multiprocessing) aún no está integrado; usar n_procesos=1")
     settings, base_dir = _load_settings(Path(settings_path))
-    return run(cl.load_config(settings, base_dir=base_dir), **kwargs)
+    return run(cl.load_config(settings, base_dir=base_dir), n_procesos=n_procesos, **kwargs)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -247,6 +380,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--settings", default="config/settings.yaml")
     ap.add_argument("--solo-fase0", action="store_true", help="valida archivos, construye la máscara y muestra el plan")
     ap.add_argument("--bloque-filas", type=int, default=None)
+    ap.add_argument("--procesos", type=int, default=None,
+                    help="procesos de la Fase 1 (por defecto: paralelo.procesos_produccion de settings.yaml)")
     args = ap.parse_args(argv)
 
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s")
@@ -263,7 +398,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         fh = logging.FileHandler(log_dir / f"runner_{datetime.now():%Y%m%dT%H%M%S}.log", encoding="utf-8")
         fh.setFormatter(fmt)
         root.addHandler(fh)
-        report = run(cfg, solo_fase0=args.solo_fase0, bloque_filas=args.bloque_filas)
+        n = args.procesos or int(settings["paralelo"]["procesos_produccion"])
+        report = run(cfg, solo_fase0=args.solo_fase0, bloque_filas=args.bloque_filas, n_procesos=n)
     except (OSError, cl.FirmsError) as exc:
         log.error("%s", exc)
         return 2
@@ -279,3 +415,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
