@@ -1,0 +1,265 @@
+{
+  "modulo": "firewatch.spark.build_daily",
+  "fecha_ejecucion": "2026-11-18T14:39:23",
+  "spark": {
+    "version": "3.5.5",
+    "master": "local[*]",
+    "shuffle_partitions": "8",
+    "aqe": "true"
+  },
+  "params": {
+    "silver": "data\\silver",
+    "inter": "data\\int",
+    "inicio": "2022-01-01",
+    "fin": "2026-10-31",
+    "dpto_boyaca": "15",
+    "ventana_precip": "30",
+    "umbral_dia_seco": "1.0",
+    "viento_max_kmh": "144.0",
+    "decimales_huella": "6"
+  },
+  "conteos": {
+    "clima_horario": 5210280,
+    "clima_diario": 217095,
+    "municipio_dia": 217095,
+    "agg_depto_mes": 1914,
+    "municipios": 123,
+    "departamentos": 33,
+    "dias": 1765,
+    "meses": 58,
+    "detecciones_boyaca": 4294,
+    "detecciones_nacionales_sin_estaticas": 861301
+  },
+  "esquemas": {
+    "clima_diario": "struct<cod_mpio:string,fecha:date,tmax:double,tmean:double,precip:double,rh_min:double,wind_max:double,et0:double,n_horas:int>",
+    "municipio_dia": "struct<cod_mpio:string,fecha:date,tmax:double,tmean:double,precip:double,rh_min:double,wind_max:double,et0:double,n_det:int,frp_sum:double,precip_30d:double,dia_seco:boolean,id_racha:string>",
+    "agg_depto_mes": "struct<cod_dpto:string,fecha_mes:date,n_det:int,frp_total:double>"
+  },
+  "checks": [
+    {
+      "id": "BD-1",
+      "descripcion": "filas clima_horario",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 5210280,
+      "esperado": 5210280
+    },
+    {
+      "id": "BD-2",
+      "descripcion": "PK (cod_mpio, ts_local) única",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 5210280,
+      "esperado": 5210280
+    },
+    {
+      "id": "BD-3",
+      "descripcion": "fecha = fecha local de ts_local",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "BD-4",
+      "descripcion": "rango de fechas = ventana",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": [
+        "2022-01-01",
+        "2026-10-31"
+      ],
+      "esperado": [
+        "2022-01-01",
+        "2026-10-31"
+      ]
+    },
+    {
+      "id": "BD-5",
+      "descripcion": "0 nulos en claves y variables horarias",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "cod_mpio": 0,
+        "ts_local": 0,
+        "fecha": 0,
+        "temp": 0,
+        "rh": 0,
+        "precip": 0,
+        "wind": 0,
+        "et0": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "BD-6",
+      "descripcion": "filas clima_diario",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 217095,
+      "esperado": 217095
+    },
+    {
+      "id": "BD-7",
+      "descripcion": "n_horas = 24 en todo municipio-día",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "BD-8",
+      "descripcion": "serie diaria completa y contigua por municipio",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "BD-9",
+      "descripcion": "0 nulos en clima diario",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "tmax": 0,
+        "tmean": 0,
+        "precip": 0,
+        "rh_min": 0,
+        "wind_max": 0,
+        "et0": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "BD-10",
+      "descripcion": "coherencia física (tmax≥tmean, rh∈[0,100], precip≥0, et0≥0)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "tmax_lt_tmean": 0,
+        "rh_fuera": 0,
+        "precip_neg": 0,
+        "et0_neg": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "BD-11",
+      "descripcion": "rangos V-M5 (viento ≤ 144 km/h, tmax ∈ [-10, 45])",
+      "nivel": "advertencia",
+      "ok": true,
+      "valor": {
+        "viento_fuera": 0,
+        "tmax_fuera": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "BD-12",
+      "descripcion": "municipios clima = dim_municipio (ambos sentidos)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "sin_dim": 0,
+        "sin_clima": 0
+      },
+      "esperado": {
+        "sin_dim": 0,
+        "sin_clima": 0
+      }
+    },
+    {
+      "id": "BD-13",
+      "descripcion": "filas municipio_dia",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 217095,
+      "esperado": 217095
+    },
+    {
+      "id": "BD-14",
+      "descripcion": "Σ n_det = detecciones Boyacá en silver",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 4294,
+      "esperado": 4294
+    },
+    {
+      "id": "BD-15",
+      "descripcion": "detecciones Boyacá fuera de la grilla",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "BD-16",
+      "descripcion": "n_det sin nulos ni negativos",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "BD-17",
+      "descripcion": "precip_30d nulo solo en los primeros días",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 3567,
+      "esperado": 3567
+    },
+    {
+      "id": "BD-18",
+      "descripcion": "id_racha no nulo ⇔ dia_seco",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "BD-19",
+      "descripcion": "filas agg_depto_mes",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 1914,
+      "esperado": 1914
+    },
+    {
+      "id": "BD-20",
+      "descripcion": "Σ nacional = silver sin estáticas",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 861301,
+      "esperado": 861301
+    },
+    {
+      "id": "BD-21",
+      "descripcion": "Boyacá en agregado = Σ n_det de municipio_dia",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 4294,
+      "esperado": 4294
+    },
+    {
+      "id": "BD-22",
+      "descripcion": "cod_dpto de detecciones ⊆ dim_departamento",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    }
+  ],
+  "publicado": true,
+  "huellas": {
+    "clima_diario": "-1891421135774902947590",
+    "municipio_dia": "5630834552889385798034",
+    "agg_depto_mes": "30023340501894411316"
+  },
+  "tiempos": {
+    "clima_diario_s": 4.337,
+    "municipio_dia_agg_s": 3.631,
+    "validacion_s": 6.433,
+    "escritura_s": 1.957,
+    "total_s": 20.887
+  }
+}

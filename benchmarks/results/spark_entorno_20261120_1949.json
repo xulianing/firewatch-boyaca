@@ -1,0 +1,10 @@
+{
+  "fecha": "2026-11-20T19:49:52",
+  "sistema": "Windows-11-10.0.26200-SP0",
+  "procesador": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+  "nucleos_logicos": 12,
+  "python": "3.12.7",
+  "spark": "3.5.5",
+  "java": "17.0.20.1",
+  "driver_memory": "4g"
+}

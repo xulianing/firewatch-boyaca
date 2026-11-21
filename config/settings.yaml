@@ -19,15 +19,19 @@ territorio:
   n_municipios_foco: 123
   bbox_colombia: {lon_min: -79.1, lat_min: -4.3, lon_max: -66.8, lat_max: 13.5}
   crs: "EPSG:4326"
-  tolerancia_simplificacion_grados: 0.001     # ≈110 m < píxel VIIRS de 375 m
 
 rutas:
   raw: data/raw
+  raw_firms: data/raw/firms              # CSV anual por país, 2022–2025 (SP)
+  raw_firms_2026: data/raw/firms_2026    # Archive Download: archive/ (SP) y nrt/ (NRT)
+  raw_mgn: data/raw/dane/MGN2025_MPIO_GRAFICO/MGN_ADM_MPIO_GRAFICO.shp
   silver: data/silver
   gold: data/gold
+  intermedio: data/int
   benchmarks_resultados: benchmarks/results
   benchmarks_figuras: benchmarks/figures
   provincias_csv: config/provincias_boyaca.csv
+  centroides: config/centroides_boyaca.csv     # puente temporal para meteo hasta silver/dim_municipio (B3)
 
 firms:
   satelites: ["N", "N20"]           # VIIRS S-NPP, NOAA-20 (sin MODIS ni NOAA-21)
@@ -42,18 +46,50 @@ firms:
     tamano_celda_grados: 0.005
     anios_fuente: [2022, 2023, 2024, 2025]
   dedup_claves: [latitude, longitude, acq_date, acq_time, satellite]
+  validacion:                       # umbrales de los checks V-C* de L2: alertan o bloquean, NO cambian datos
+    umbral_descarte_rango: 0.01     # V-C10: > 1 % de F2+F3 en un archivo = problema de lectura (bloquea)
+    ratio_n20_n: [0.7, 1.5]         # V-C11: razón anual N20/N (advertencia)
+    tol_salto_sp_nrt: 0.30          # V-C12: mes NRT frente a la media de la línea base (advertencia)
+    sobre_enmascaramiento_max: 0.02 # V-C13c: fracción de SP type 0 dentro de la máscara (advertencia)
+    zona_control: {lat: [5.6, 5.8], lon: [-73.0, -72.8]}   # V-C13: Nobsa–Sogamoso debe quedar enmascarado
 
-meteo:
-  endpoint: "https://archive-api.open-meteo.com/v1/archive"
-  zona_horaria: "America/Bogota"
-  variables_horarias:
+meteo:                              # firewatch.ingest.meteo (claves en inglés: las lee load_config)
+  base_url: "https://archive-api.open-meteo.com/v1/archive"
+  model: era5_seamless              # CONGELADO (3 nov 2026); cambiarlo exige ADR
+  timezone: "America/Bogota"
+  hourly_vars:                      # ADR-0003
     - temperature_2m
     - relative_humidity_2m
     - precipitation
     - wind_speed_10m
     - et0_fao_evapotranspiration
-  pausa_entre_peticiones_s: 1.0
-  reintentos: 3
+  wind_speed_unit: ms               # raw en m/s; silver convierte a km/h (diccionario de datos)
+  cola_start: "2026-10-26"          # tramo base → 2026-10-25; cola desde el 6 nov (rezago ERA5)
+  pace_seconds: 60                  # 1 petición por minuto
+  max_attempts: 5
+  timeout_connect_s: 10
+  timeout_read_s: 180
+  budget: {daily: 9000, hourly: 4500, minute: 500}   # margen bajo los límites gratuitos
+  coord_decimals: 4
+  expected_n_locations: 123
+
+dane:                               # firewatch.ingest.dane (foco: se lee de territorio)
+  vigencia: 2025
+  n_mpios_pais: [1100, 1125]
+  n_dptos: 33
+  code_column: mpio_cdpmp
+  crs_origen: 4326                  # V-D5: el .prj del MGN 2025 declara WGS 84
+  crs_area: 9377
+  coord_decimals: 4
+  simplify_tolerance_deg: 0.0003    # ≈33 m < píxel VIIRS de 375 m (V-D13 con el MGN real)
+  area_tol: 0.05
+  area_tol_share: 0.95
+  area_foco_km2: [21000, 25000]
+  simplify_area_tol: 0.01
+  sjoin_check_points: 100000
+  sjoin_agreement_min: 0.999
+  sjoin_seed: 20261104
+  elevation_range: [100, 4500]
 
 paralelo:                           # L2 multiprocessing
   tamano_bloque_filas: 150000
