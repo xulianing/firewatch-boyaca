@@ -8,5 +8,6 @@ Toda desviación de la arquitectura congelada requiere un ADR de una página y e
 | [0002](0002-cruce-espacial-en-multiprocessing.md) | Cruce espacial con GeoPandas en multiprocessing (no en Spark) | Aceptada |
 | [0003](0003-clima-horario-agregado-en-spark.md) | Clima horario agregado a diario en Spark | Aceptada |
 | [0004](0004-ventana-2022-2026.md) | Ventana temporal 2022-01-01 → 2026-10-31 | Aceptada |
+| [0005](0005-mascara-por-persistencia.md) | Máscara de fuentes estáticas ampliada por persistencia (hornos y ladrilleras) | Propuesta |
 
 Plantilla: **Contexto · Decisión · Alternativas descartadas · Consecuencias · Fecha y aprobaciones.**
