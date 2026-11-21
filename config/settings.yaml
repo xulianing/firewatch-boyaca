@@ -48,6 +48,7 @@ firms:
     persistencia:                   # ADR-0005: fuentes industriales que FIRMS no marca como type 2
       meses_min: 6                  # meses (año-mes) distintos con detección SP type 0 en la celda
       anios_min: 3                  # años distintos de anios_fuente
+      dilatacion: 0                 # probada con 1: V-C13c 2,28 % > 2 % → revertida (ADR-0005)
   dedup_claves: [latitude, longitude, acq_date, acq_time, satellite]
   validacion:                       # umbrales de los checks V-C* de L2: alertan o bloquean, NO cambian datos
     umbral_descarte_rango: 0.01     # V-C10: > 1 % de F2+F3 en un archivo = problema de lectura (bloquea)

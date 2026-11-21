@@ -336,12 +336,35 @@ def test_build_static_mask_persistencia(tmp_path):
     assert list(cells) == sorted(crit)
 
 
+
+def test_build_static_mask_persistencia_con_dilatacion(tmp_path):
+    """dilatacion=1: las 8 vecinas de la celda persistente entran como persistencia_vecina; a 2 celdas, no."""
+    s = settings_for(tmp_path)
+    s["firms"]["mascara_estatica"]["anios_fuente"] = [2024, 2025]
+    s["firms"]["mascara_estatica"]["persistencia"] = {"meses_min": 4, "anios_min": 2, "dilatacion": 1}
+    cfg = cl.load_config(s, base_dir=tmp_path)
+    horno = [row(5.4786, -73.5139, d) for d in ("2024-02-01", "2024-06-01", "2025-03-01", "2025-09-01")]
+    vecina = [row(5.4786, -73.5075, "2025-01-10")]                     # columna contigua (j + 1)
+    lejana = [row(5.4786, -73.5025, "2025-01-11")]                     # a 2 columnas: fuera del anillo
+    raw = pd.DataFrame(horno + vecina + lejana).astype({"acq_time": "string"})
+    cells, table = cl.build_static_mask(cl.normalize(raw), cfg)
+    crit = dict(zip(table["celda_id"], table["criterio"]))
+    c = lambda lat, lon: cl.cell_ids([lat], [lon], 0.005)[0]
+    assert len(cells) == 9 and list(cells) == sorted(crit)                 # núcleo + 8 vecinas
+    assert crit[c(5.4786, -73.5139)] == "persistencia"
+    assert crit[c(5.4786, -73.5075)] == "persistencia_vecina"
+    assert table.set_index("celda_id").loc[c(5.4786, -73.5075), "n_det"] == 1
+    assert c(5.4786, -73.5025) not in crit
+
 def test_persistencia_desactivada_sin_clave_y_parametros_validos(tmp_path):
     cfg = cl.load_config(settings_for(tmp_path), base_dir=tmp_path)
     assert (cfg.persist_meses_min, cfg.persist_anios_min) == (0, 0)
     s = settings_for(tmp_path)
     s["firms"]["mascara_estatica"]["persistencia"] = {"meses_min": 6}
     with pytest.raises(cl.FirmsError, match="persistencia"):
+        cl.load_config(s, base_dir=tmp_path)
+    s["firms"]["mascara_estatica"]["persistencia"] = {"meses_min": 6, "anios_min": 3, "dilatacion": -1}
+    with pytest.raises(cl.FirmsError, match="dilatacion"):
         cl.load_config(s, base_dir=tmp_path)
 
 # =============================================================================
