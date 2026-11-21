@@ -7,6 +7,10 @@ Arquitectura §"Tratamiento SP frente a NRT":
   - Máscara de fuentes estáticas = celdas de firms.mascara_estatica.tamano_celda_grados con al menos una
     detección SP type == firms.mascara_estatica.type_estatico (2) en anios_fuente. Sin umbral mínimo de
     detecciones ni dilatación: la máscara ampliada de la v0.1 (type ∈ {1,2,3}, min_det, 3×3) requiere ADR.
+  - ADR-0005 (21 nov 2026): + celdas PERSISTENTES = detecciones SP type_permitido (vegetación según FIRMS)
+    en >= persistencia.meses_min meses distintos y >= persistencia.anios_min años distintos de anios_fuente.
+    Atrapa fuentes industriales pequeñas (hornos de coque, ladrilleras) que FIRMS no clasifica como type 2.
+    Sin la clave persistencia en settings la regla queda desactivada (comportamiento anterior).
   - La máscara se aplica a TODO (incluido NRT 2026) y solo MARCA fuente_estatica; gold excluye esas filas.
   - confidence ∉ firms.filtros.confianza_excluida.
   - Lectura de los CSV reales con firewatch.ingest.firms (rutas, alias brightness/bright_t31, SNPP).
@@ -118,6 +122,8 @@ class FirmsConfig:
     vc13_sobre_max: float
     zona_control_lat: tuple[float, float]
     zona_control_lon: tuple[float, float]
+    persist_meses_min: int = 0            # firms.mascara_estatica.persistencia (0 = desactivada; ADR-0005)
+    persist_anios_min: int = 0
 
     @property
     def geo_path(self) -> Path:
@@ -182,6 +188,11 @@ def load_config(settings: dict[str, Any], base_dir: str | Path | None = None) ->
         bbox_lon = (float(bbox["lon_min"]), float(bbox["lon_max"]))
     except (KeyError, TypeError) as exc:
         raise FirmsError("territorio.bbox_colombia debe tener lon_min, lat_min, lon_max, lat_max") from exc
+    pers = ((settings.get("firms") or {}).get("mascara_estatica") or {}).get("persistencia") or {}
+    try:
+        p_meses, p_anios = int(pers.get("meses_min", 0)), int(pers.get("anios_min", 0))
+    except (TypeError, ValueError) as exc:
+        raise FirmsError("firms.mascara_estatica.persistencia: meses_min y anios_min deben ser enteros") from exc
 
     cfg = FirmsConfig(
         raw_firms_dir=dir_anual,
@@ -207,6 +218,8 @@ def load_config(settings: dict[str, Any], base_dir: str | Path | None = None) ->
         vc13_sobre_max=float(_get(settings, "firms.validacion.sobre_enmascaramiento_max")),
         zona_control_lat=_pair(settings, "firms.validacion.zona_control.lat"),
         zona_control_lon=_pair(settings, "firms.validacion.zona_control.lon"),
+        persist_meses_min=p_meses,
+        persist_anios_min=p_anios,
     )
     if cfg.window_start >= cfg.window_end:
         raise FirmsError("ventana: fecha_inicio debe ser anterior a fecha_fin")
@@ -214,6 +227,8 @@ def load_config(settings: dict[str, Any], base_dir: str | Path | None = None) ->
         raise FirmsError(f"firms.satelites solo admite N y N20; recibido {cfg.satelites}")
     if cfg.celda_deg <= 0 or cfg.bloque_filas < 1 or not cfg.mascara_anios:
         raise FirmsError("firms.mascara_estatica / paralelo.tamano_bloque_filas con valores inválidos")
+    if p_meses < 0 or p_anios < 0 or (p_meses > 0) != (p_anios > 0):
+        raise FirmsError("firms.mascara_estatica.persistencia: meses_min y anios_min van juntos y deben ser > 0")
     return cfg
 
 
@@ -376,25 +391,53 @@ def _sp_static(norm: pd.DataFrame, cfg: FirmsConfig) -> pd.DataFrame:
                 & norm["fecha"].dt.year.isin(cfg.mascara_anios)]
 
 
+def _sp_vegetacion(norm: pd.DataFrame, cfg: FirmsConfig) -> pd.DataFrame:
+    """Detecciones SP de mascara_anios que FIRMS clasifica como vegetación (type_permitido), sin confianza baja."""
+    return norm[(norm["proceso"] == "SP") & (norm["tipo"] == cfg.type_permitido).fillna(False)
+                & norm["fecha"].dt.year.isin(cfg.mascara_anios)
+                & ~norm["confianza"].isin(cfg.confianza_excluida).fillna(False)]
+
+
+_MASK_COLS = ["celda_id", "i", "j", "lat_celda", "lon_celda", "n_det", "n_dias", "n_meses", "n_anios", "criterio"]
+
+
+def _cell_table(rows: pd.DataFrame, cfg: FirmsConfig) -> pd.DataFrame:
+    """Conteos por celda: detecciones, días, meses (año-mes) y años distintos."""
+    tmp = pd.DataFrame({"celda_id": cell_ids(rows["latitude"], rows["longitude"], cfg.celda_deg),
+                        "fecha": rows["fecha"].to_numpy()})
+    tmp["anio"] = tmp["fecha"].dt.year
+    tmp["mes"] = tmp["fecha"].dt.to_period("M")
+    return tmp.groupby("celda_id").agg(n_det=("fecha", "size"), n_dias=("fecha", "nunique"),
+                                       n_meses=("mes", "nunique"), n_anios=("anio", "nunique")).reset_index()
+
+
 def build_static_mask(norm: pd.DataFrame, cfg: FirmsConfig) -> tuple[np.ndarray, pd.DataFrame]:
     """
-    Celdas de celda_deg con al menos una detección SP type == type_estatico en mascara_anios.
-    Devuelve (celda_ids ordenados y únicos, tabla de auditoría con conteos por celda).
+    Máscara = (a) celdas con al menos una detección SP type == type_estatico en mascara_anios   [criterio type2]
+            ∪ (b) celdas persistentes: SP type_permitido en >= persist_meses_min meses distintos y
+                  >= persist_anios_min años distintos de mascara_anios (ADR-0005)               [criterio persistencia]
+    Una celda que cumple ambos queda como type2. Devuelve (celda_ids ordenados y únicos, tabla de auditoría).
     """
-    sp = _sp_static(norm, cfg)
-    cols = ["celda_id", "i", "j", "lat_celda", "lon_celda", "n_det", "n_dias", "n_anios"]
-    if sp.empty:
-        return np.array([], dtype=np.int64), pd.DataFrame(columns=cols)
-    tmp = pd.DataFrame({"celda_id": cell_ids(sp["latitude"], sp["longitude"], cfg.celda_deg),
-                        "fecha": sp["fecha"].to_numpy()})
-    tmp["anio"] = tmp["fecha"].dt.year
-    table = tmp.groupby("celda_id").agg(n_det=("fecha", "size"), n_dias=("fecha", "nunique"),
-                                        n_anios=("anio", "nunique")).reset_index()
+    partes = []
+    st = _sp_static(norm, cfg)
+    if not st.empty:
+        partes.append(_cell_table(st, cfg).assign(criterio="type2"))
+    if cfg.persist_meses_min > 0:
+        veg = _sp_vegetacion(norm, cfg)
+        if not veg.empty:
+            tp = _cell_table(veg, cfg)
+            tp = tp[(tp["n_meses"] >= cfg.persist_meses_min) & (tp["n_anios"] >= cfg.persist_anios_min)]
+            if partes:
+                tp = tp[~tp["celda_id"].isin(partes[0]["celda_id"])]
+            partes.append(tp.assign(criterio="persistencia"))
+    if not partes:
+        return np.array([], dtype=np.int64), pd.DataFrame(columns=_MASK_COLS)
+    table = pd.concat(partes, ignore_index=True)
     ti, tj = decode_cells(table["celda_id"].to_numpy())
     table["i"], table["j"] = ti, tj
     table["lat_celda"] = (ti + 0.5) * cfg.celda_deg
     table["lon_celda"] = (tj + 0.5) * cfg.celda_deg
-    table = table[cols].sort_values("celda_id").reset_index(drop=True)
+    table = table[_MASK_COLS].sort_values("celda_id").reset_index(drop=True)
     return table["celda_id"].to_numpy(dtype=np.int64), table
 
 
@@ -414,6 +457,13 @@ def mask_quality(norm: pd.DataFrame, cells: np.ndarray, table: pd.DataFrame, cfg
     n_zona = int((table["lat_celda"].between(la0, la1) & table["lon_celda"].between(lo0, lo1)).sum())
     det = {"celdas": int(len(cells)), "celdas_zona_control": n_zona, "cobertura": cov,
            "sobre_enmascaramiento": over, "n_sp_estaticas": int(len(st)), "n_sp_veg": int(len(veg))}
+    pers = table[table["criterio"] == "persistencia"] if "criterio" in table.columns else table.iloc[0:0]
+    over_p = (float(np.isin(cell_ids(veg["latitude"], veg["longitude"], cfg.celda_deg),
+                            pers["celda_id"].to_numpy(dtype=np.int64)).mean()) if len(veg) else 0.0)
+    det.update({"celdas_persistencia": int(len(pers)), "sobre_enmascaramiento_persistencia": over_p})
+    lg.info("V-C13p", "celdas añadidas por persistencia (ADR-0005)",
+            {"celdas": int(len(pers)), "n_det_sp_veg": int(pers["n_det"].sum()) if len(pers) else 0,
+             "fraccion_sp_veg": over_p})
     lg.add("V-C13", n_zona > 0 and cov == 1.0,
            f"celdas en zona de control={n_zona}; cobertura={cov:.2%} (se esperaba 100 %)", details=det)
     lg.add("V-C13c", over < cfg.vc13_sobre_max,
