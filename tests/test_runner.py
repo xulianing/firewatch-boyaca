@@ -1,8 +1,11 @@
 """
-Tests del runner secuencial de L2.
+Tests del runner de L2 (secuencial y paralelo).
 
 - Nivel 1 (siempre corre): plan de bloques y orquestación completa con DOBLES para el cruce espacial
   y la escritura Parquet → valida flujo, conservación, determinismo y política de no-publicación.
+- Modo paralelo (multiprocessing, spawn): el resultado debe ser idéntico al secuencial. Los dobles que
+  usan los workers (fake_loader, fake_join, fake_join_half_null) están a nivel de módulo porque con
+  spawn cada proceso hijo los importa por nombre.
 - Nivel 2 (requiere GeoPandas + pyarrow): de punta a punta real → silver/detecciones particionado.
 """
 
@@ -38,6 +41,14 @@ def fake_join(df, polys):
     out["cod_mpio"] = np.where(boy, np.where(df["lon"] < -73.3, "15176", "15001"), "05001")
     out["cod_mpio"] = out["cod_mpio"].astype("string")
     out["cod_dpto"] = out["cod_mpio"].str[:2].astype("string")
+    return out
+
+
+def fake_join_half_null(df, polys):
+    """Doble defectuoso: deja el 50 % de las filas sin municipio (debe disparar V-SJ2).
+    A nivel de módulo, no anidado: en modo paralelo se envía a los workers por nombre."""
+    out = fake_join(df, polys)
+    out.loc[out.index[: len(out) // 2], ["cod_mpio", "cod_dpto"]] = pd.NA
     return out
 
 
@@ -118,9 +129,43 @@ def test_solo_fase0_writes_only_the_fase0_report(cfg, captured):
     assert captured == {} and (cfg.out_report.parent / "cleaning_fase0.json").exists()
 
 
-def test_ejecutar_silver_rejects_parallel_until_integrated():
-    with pytest.raises(NotImplementedError):
-        rn.ejecutar_silver(4)
+# ----------------------------------------------------------------------------- modo paralelo (B6)
+
+def test_parallel_equals_sequential(cfg, captured):
+    """V-C14 en su forma paralela: con 2 procesos la salida es idéntica fila por fila a la secuencial."""
+    seq = rn.run(cfg, polygons_loader=fake_loader, joiner=fake_join, bloque_filas=200, n_procesos=1)
+    det_seq = captured["detecciones"]
+    par = rn.run(cfg, polygons_loader=fake_loader, joiner=fake_join, bloque_filas=200, n_procesos=2)
+    assert seq["modo"] == "secuencial" and par["modo"] == "paralelo" and par["n_procesos"] == 2
+    assert par["plan"]["n_bloques"] >= 2                                            # hubo reparto real
+    assert par["content_sha256"] == seq["content_sha256"]
+    assert par["metricas"] == seq["metricas"]                                       # conservación idéntica
+    pd.testing.assert_frame_equal(captured["detecciones"].reset_index(drop=True),
+                                  det_seq.reset_index(drop=True))
+
+
+def test_parallel_does_not_publish_when_validation_fails(cfg, captured):
+    """D-G7 también con p > 1: si falla un check bloqueante no se publica nada."""
+    with pytest.raises(rn.RunnerValidationError, match="V-SJ2"):
+        rn.run(cfg, polygons_loader=fake_loader, joiner=fake_join_half_null, bloque_filas=200, n_procesos=2)
+    assert captured == {}
+    rep = json.loads(cfg.out_report.read_text(encoding="utf-8"))
+    assert rep["status"] == "fallido" and rep["modo"] == "paralelo"
+
+
+def test_run_rejects_zero_processes(cfg):
+    with pytest.raises(ValueError, match="n_procesos"):
+        rn.run(cfg, n_procesos=0)
+
+
+def test_ejecutar_silver_passes_n_procesos(tmp_path, monkeypatch):
+    """ejecutar_silver (la API del benchmark) entrega n_procesos a run sin alterarlo."""
+    import yaml
+    settings_file = tmp_path / "config" / "settings.yaml"
+    settings_file.parent.mkdir(parents=True)
+    settings_file.write_text(yaml.safe_dump(settings_for(tmp_path)), encoding="utf-8")
+    monkeypatch.setattr(rn, "run", lambda cfg, **kw: kw)
+    assert rn.ejecutar_silver(4, settings_path=settings_file)["n_procesos"] == 4
 
 
 def test_main_config_error_exit_2(tmp_path):

@@ -1,0 +1,25 @@
+{
+  "fecha": "2026-11-21T09:47:12",
+  "sistema": "Windows-11-10.0.26200-SP0",
+  "procesador": "11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz",
+  "nucleos_fisicos": 4,
+  "nucleos_logicos": 8,
+  "ram_gb": 7.8,
+  "python": "3.12.7",
+  "metodo_inicio": "spawn",
+  "pandas": "2.2.3",
+  "numpy": "1.26.4",
+  "geopandas": "1.0.1",
+  "shapely": "2.0.6",
+  "tamano_bloque_filas": 25000,
+  "procesos": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "repeticiones": 5,
+  "calentamiento": 1,
+  "bloques_por_proceso_debil": 4,
+  "rapido": false
+}

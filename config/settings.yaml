@@ -96,7 +96,7 @@ dane:                               # firewatch.ingest.dane (foco: se lee de ter
   elevation_range: [100, 4500]
 
 paralelo:                           # L2 multiprocessing
-  tamano_bloque_filas: 150000
+  tamano_bloque_filas: 25000
   procesos_produccion: 4
   benchmark:
     procesos: [1, 2, 4, 8]
