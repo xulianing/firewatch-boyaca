@@ -1,0 +1,200 @@
+{
+  "modulo": "firewatch.spark.climatology",
+  "fecha_ejecucion": "2026-11-21T18:50:51",
+  "spark": {
+    "version": "3.5.5",
+    "master": "local[*]",
+    "shuffle_partitions": "8",
+    "aqe": "true"
+  },
+  "params": {
+    "silver": "data\\silver",
+    "inter": "data\\int",
+    "inicio": "2022-01-01",
+    "fin": "2026-10-31",
+    "anios_lb": "(2022, 2023, 2024, 2025)",
+    "meses_previos": "3",
+    "decimales_huella": "6"
+  },
+  "decisiones": {
+    "P-A": "racha_seca_max recortada al mes",
+    "P-B": "det_3m_previos nulo en los primeros 3 meses"
+  },
+  "entrada_build_daily": {
+    "clima_diario": "-1891421135774902947590",
+    "municipio_dia": "5465239978052835152182",
+    "agg_depto_mes": "-239533042954926607322"
+  },
+  "conteos": {
+    "municipio_dia": 217095,
+    "municipio_mes": 7134,
+    "linea_base": 1476,
+    "municipios": 123,
+    "meses": 58,
+    "detecciones": 3908,
+    "det_3m_previos_nulos": 369,
+    "celdas_con_deteccion": 807
+  },
+  "esquemas": {
+    "municipio_mes": "struct<cod_mpio:string,fecha_mes:date,anio:int,mes:int,n_dias:int,n_det:int,frp_total:double,frp_medio:double,det_100km2:double,precip_mes:double,tmax_media:double,rh_min_media:double,wind_max_media:double,racha_seca_max:int,anom_precip:double,anom_tmax:double,anom_rh:double,dens_loyo:double,det_3m_previos:double>",
+    "linea_base": "struct<cod_mpio:string,mes:int,precip_lb:double,tmax_lb:double,rh_min_lb:double,dens_suma_lb:double,n_anios_lb:int>"
+  },
+  "checks": [
+    {
+      "id": "CL-0",
+      "descripcion": "build_daily publicado (informe con publicado = true)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": true,
+      "esperado": true
+    },
+    {
+      "id": "CL-1",
+      "descripcion": "filas municipio_dia = municipios × días = informe de build_daily",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "filas": 217095,
+        "informe": 217095
+      },
+      "esperado": 217095
+    },
+    {
+      "id": "CL-2",
+      "descripcion": "todo municipio tiene area_km2 > 0 en dim_municipio",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "CL-3",
+      "descripcion": "filas municipio_mes = municipios × meses; PK única",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "filas": 7134,
+        "pk": 7134
+      },
+      "esperado": 7134
+    },
+    {
+      "id": "CL-4",
+      "descripcion": "n_dias = días del mes calendario dentro de la ventana",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "CL-5",
+      "descripcion": "Σ n_det y Σ FRP se conservan (día → mes)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "n_det": 3908,
+        "frp": 36758.22
+      },
+      "esperado": {
+        "n_det": 3908,
+        "frp": 36758.21999999998
+      }
+    },
+    {
+      "id": "CL-6",
+      "descripcion": "linea_base = municipios × 12; n_anios_lb = 4 en todas",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "filas": 1476,
+        "anios_mal": 0
+      },
+      "esperado": {
+        "filas": 1476,
+        "anios_mal": 0
+      }
+    },
+    {
+      "id": "CL-7",
+      "descripcion": "media de cada anomalía en la línea base = 0 (join correcto)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 7.105427357601002e-14,
+      "esperado": "≤ 1e-06"
+    },
+    {
+      "id": "CL-8",
+      "descripcion": "racha_seca_max ∈ [0, n_dias], ≤ días secos y 0 ⇔ sin días secos (P-A)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "fuera_de_rango": 0,
+        "incoherentes": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "CL-9",
+      "descripcion": "dens_loyo no nulo y ≥ 0",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "CL-10",
+      "descripcion": "det_3m_previos nulo solo en los primeros 3 meses (P-B)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "nulos": 369,
+        "nulos_fuera_del_borde": 0
+      },
+      "esperado": {
+        "nulos": 369,
+        "nulos_fuera_del_borde": 0
+      }
+    },
+    {
+      "id": "CL-11",
+      "descripcion": "frp_medio nulo ⇔ n_det = 0",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "CL-12",
+      "descripcion": "0 nulos en las columnas obligatorias",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "n_dias": 0,
+        "n_det": 0,
+        "frp_total": 0,
+        "det_100km2": 0,
+        "precip_mes": 0,
+        "tmax_media": 0,
+        "rh_min_media": 0,
+        "wind_max_media": 0,
+        "racha_seca_max": 0,
+        "anom_precip": 0,
+        "anom_tmax": 0,
+        "anom_rh": 0,
+        "dens_loyo": 0
+      },
+      "esperado": 0
+    }
+  ],
+  "publicado": true,
+  "huellas": {
+    "municipio_mes": "1420103901944932865270",
+    "linea_base": "-512814368622433535530"
+  },
+  "tiempos": {
+    "calculo_s": 5.526,
+    "validacion_s": 3.273,
+    "escritura_s": 1.657,
+    "total_s": 13.648
+  }
+}

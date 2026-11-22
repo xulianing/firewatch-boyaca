@@ -1,6 +1,6 @@
 {
   "modulo": "firewatch.spark.build_daily",
-  "fecha_ejecucion": "2026-11-18T14:39:23",
+  "fecha_ejecucion": "2026-11-21T18:50:24",
   "spark": {
     "version": "3.5.5",
     "master": "local[*]",
@@ -27,8 +27,8 @@
     "departamentos": 33,
     "dias": 1765,
     "meses": 58,
-    "detecciones_boyaca": 4294,
-    "detecciones_nacionales_sin_estaticas": 861301
+    "detecciones_boyaca": 3908,
+    "detecciones_nacionales_sin_estaticas": 855771
   },
   "esquemas": {
     "clima_diario": "struct<cod_mpio:string,fecha:date,tmax:double,tmean:double,precip:double,rh_min:double,wind_max:double,et0:double,n_horas:int>",
@@ -181,8 +181,8 @@
       "descripcion": "Σ n_det = detecciones Boyacá en silver",
       "nivel": "bloqueante",
       "ok": true,
-      "valor": 4294,
-      "esperado": 4294
+      "valor": 3908,
+      "esperado": 3908
     },
     {
       "id": "BD-15",
@@ -229,16 +229,16 @@
       "descripcion": "Σ nacional = silver sin estáticas",
       "nivel": "bloqueante",
       "ok": true,
-      "valor": 861301,
-      "esperado": 861301
+      "valor": 855771,
+      "esperado": 855771
     },
     {
       "id": "BD-21",
       "descripcion": "Boyacá en agregado = Σ n_det de municipio_dia",
       "nivel": "bloqueante",
       "ok": true,
-      "valor": 4294,
-      "esperado": 4294
+      "valor": 3908,
+      "esperado": 3908
     },
     {
       "id": "BD-22",
@@ -252,14 +252,14 @@
   "publicado": true,
   "huellas": {
     "clima_diario": "-1891421135774902947590",
-    "municipio_dia": "5630834552889385798034",
-    "agg_depto_mes": "30023340501894411316"
+    "municipio_dia": "5465239978052835152182",
+    "agg_depto_mes": "-239533042954926607322"
   },
   "tiempos": {
-    "clima_diario_s": 4.337,
-    "municipio_dia_agg_s": 3.631,
-    "validacion_s": 6.433,
-    "escritura_s": 1.957,
-    "total_s": 20.887
+    "clima_diario_s": 11.253,
+    "municipio_dia_agg_s": 10.7,
+    "validacion_s": 9.296,
+    "escritura_s": 2.129,
+    "total_s": 40.894
   }
 }

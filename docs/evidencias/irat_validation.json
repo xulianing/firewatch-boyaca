@@ -1,0 +1,252 @@
+{
+  "modulo": "firewatch.spark.irat",
+  "fecha_ejecucion": "2026-11-21T18:55:32",
+  "spark": {
+    "version": "3.5.5",
+    "master": "local[*]",
+    "shuffle_partitions": "8",
+    "aqe": "true"
+  },
+  "params": {
+    "inter": "data\\int",
+    "pesos": {
+      "H": 0.3,
+      "P": 0.25,
+      "D": 0.15,
+      "T": 0.15,
+      "R": 0.1,
+      "W": 0.05
+    },
+    "mezcla_h": 0.5,
+    "categorias": [
+      "Muy bajo",
+      "Bajo",
+      "Moderado",
+      "Alto",
+      "Muy alto"
+    ],
+    "ordenes_alto": [
+      4,
+      5
+    ],
+    "normalizacion": "rango_percentil",
+    "decimales_huella": "6"
+  },
+  "entrada_climatology": {
+    "municipio_mes": "1420103901944932865270",
+    "linea_base": "-512814368622433535530"
+  },
+  "conteos": {
+    "municipio_mes": 7134,
+    "municipio_mes_irat": 7134,
+    "irat_sensibilidad": 7134,
+    "detecciones": 3908
+  },
+  "indicadores": {
+    "cortes": {
+      "irat": [
+        0.24411608019066314,
+        0.3685910556568064,
+        0.47246039534557693,
+        0.591180428992009
+      ],
+      "irat_iguales": [
+        0.284237581195383,
+        0.3964390859385953,
+        0.5012523949717276,
+        0.6167390999579421
+      ],
+      "irat_solo_clima": [
+        0.27707436262041624,
+        0.41699545372614216,
+        0.5550920269972563,
+        0.691217880675332
+      ]
+    },
+    "distribucion": {
+      "Muy bajo": {
+        "celdas": 1427,
+        "detecciones": 64
+      },
+      "Bajo": {
+        "celdas": 1427,
+        "detecciones": 89
+      },
+      "Moderado": {
+        "celdas": 1426,
+        "detecciones": 443
+      },
+      "Alto": {
+        "celdas": 1427,
+        "detecciones": 695
+      },
+      "Muy alto": {
+        "celdas": 1427,
+        "detecciones": 2617
+      }
+    },
+    "K5_tasa_captura": {
+      "irat_solo_clima": 0.6067041965199591,
+      "irat": 0.8474923234390993,
+      "irat_iguales": 0.7515353121801432
+    },
+    "categorias_alto": [
+      "Alto",
+      "Muy alto"
+    ],
+    "celdas_c_H_minimo": 4695
+  },
+  "esquemas": {
+    "municipio_mes_irat": "struct<cod_mpio:string,fecha_mes:date,anio:int,mes:int,n_dias:int,n_det:int,frp_total:double,frp_medio:double,det_100km2:double,precip_mes:double,tmax_media:double,rh_min_media:double,wind_max_media:double,racha_seca_max:int,anom_precip:double,anom_tmax:double,anom_rh:double,dens_loyo:double,det_3m_previos:double,c_H:double,c_P:double,c_D:double,c_T:double,c_R:double,c_W:double,irat:double,irat_categoria:string,irat_orden:int>",
+    "irat_sensibilidad": "struct<cod_mpio:string,fecha_mes:date,n_det:int,irat:double,irat_orden:int,irat_iguales:double,orden_iguales:int,irat_solo_clima:double,orden_solo_clima:int>"
+  },
+  "checks": [
+    {
+      "id": "IR-0",
+      "descripcion": "climatology publicado (informe con publicado = true)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": true,
+      "esperado": true
+    },
+    {
+      "id": "IR-1",
+      "descripcion": "Σ pesos = 1 y pesos ≥ 0",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "H": 0.3,
+        "P": 0.25,
+        "D": 0.15,
+        "T": 0.15,
+        "R": 0.1,
+        "W": 0.05
+      },
+      "esperado": "Σ = 1"
+    },
+    {
+      "id": "IR-2",
+      "descripcion": "filas = municipio_mes (= informe de climatology); PK única",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "filas": 7134,
+        "pk": 7134,
+        "informe": 7134
+      },
+      "esperado": 7134
+    },
+    {
+      "id": "IR-3",
+      "descripcion": "c_X ∈ [0, 1] y sin nulos",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "H": 0,
+        "P": 0,
+        "D": 0,
+        "T": 0,
+        "R": 0,
+        "W": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "IR-4",
+      "descripcion": "irat ∈ [0, 1] y sin nulos",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 0,
+      "esperado": 0
+    },
+    {
+      "id": "IR-5",
+      "descripcion": "irat_orden ∈ {1..5} y coherente con irat_categoria",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "orden_fuera": 0,
+        "categoria_incoherente": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "IR-6",
+      "descripcion": "categorías monótonas: max(irat | k) < min(irat | k+1)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "1": [
+          0.012386,
+          0.244028
+        ],
+        "2": [
+          0.244175,
+          0.36859
+        ],
+        "3": [
+          0.368597,
+          0.47241
+        ],
+        "4": [
+          0.472473,
+          0.591119
+        ],
+        "5": [
+          0.591273,
+          0.963641
+        ]
+      },
+      "esperado": "creciente"
+    },
+    {
+      "id": "IR-7",
+      "descripcion": "proporción por categoría en 20 % ± 5 pp (los empates la desvían)",
+      "nivel": "advertencia",
+      "ok": true,
+      "valor": {
+        "Muy bajo": 0.2,
+        "Bajo": 0.2,
+        "Moderado": 0.1999,
+        "Alto": 0.2,
+        "Muy alto": 0.2
+      },
+      "esperado": "0,15–0,25"
+    },
+    {
+      "id": "IR-8",
+      "descripcion": "determinismo: mismo resultado con otro orden físico y otro particionado",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": "-970497809987593631438",
+      "esperado": "-970497809987593631438"
+    },
+    {
+      "id": "IR-9",
+      "descripcion": "Σ n_det se conserva",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 3908,
+      "esperado": "Σ municipio_mes"
+    },
+    {
+      "id": "IR-10",
+      "descripcion": "irat_sensibilidad tiene una fila por municipio-mes",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": 7134,
+      "esperado": 7134
+    }
+  ],
+  "publicado": true,
+  "huellas": {
+    "municipio_mes_irat": "-970497809987593631438",
+    "irat_sensibilidad": "281751758165724963996"
+  },
+  "tiempos": {
+    "calculo_s": 4.343,
+    "validacion_s": 4.828,
+    "escritura_s": 1.207,
+    "total_s": 12.784
+  }
+}

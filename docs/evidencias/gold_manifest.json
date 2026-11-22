@@ -1,0 +1,149 @@
+{
+  "fecha": "2026-11-21T19:32:57",
+  "commit": "a1b5775",
+  "entradas": {
+    "build_daily": {
+      "clima_diario": "-1891421135774902947590",
+      "municipio_dia": "5465239978052835152182",
+      "agg_depto_mes": "-239533042954926607322"
+    },
+    "climatology": {
+      "municipio_mes": "1420103901944932865270",
+      "linea_base": "-512814368622433535530"
+    },
+    "irat": {
+      "municipio_mes_irat": "-970497809987593631438",
+      "irat_sensibilidad": "281751758165724963996"
+    }
+  },
+  "tablas": {
+    "fact_municipio_mes": {
+      "archivo": "fact_municipio_mes.parquet",
+      "filas": 7134,
+      "columnas": [
+        "cod_mpio",
+        "fecha_mes",
+        "n_det",
+        "frp_total",
+        "frp_medio",
+        "det_100km2",
+        "precip_mes",
+        "tmax_media",
+        "rh_min_media",
+        "wind_max_media",
+        "racha_seca_max",
+        "anom_precip",
+        "anom_tmax",
+        "anom_rh",
+        "det_3m_previos",
+        "c_H",
+        "c_P",
+        "c_D",
+        "c_T",
+        "c_R",
+        "c_W",
+        "irat",
+        "irat_categoria",
+        "irat_orden"
+      ],
+      "sha256_archivo": "c89379a90eed2af1a006eb1792c1fb1c1f171ca2dd7c00687400d4de6d8d0670",
+      "huella_contenido": "2973f35a0eac9f0736911a46819ca45bc399b7fa233318bac1d581025678219e",
+      "relectura_ok": true
+    },
+    "fact_deteccion": {
+      "archivo": "fact_deteccion.parquet",
+      "filas": 3908,
+      "columnas": [
+        "id_det",
+        "cod_mpio",
+        "fecha",
+        "fecha_mes",
+        "hora_utc",
+        "lat",
+        "lon",
+        "frp",
+        "confianza",
+        "daynight",
+        "satelite"
+      ],
+      "sha256_archivo": "774f9fcd42a671eb6aac768e768804c984ecdef8c9f84eed57bdf321e4355990",
+      "huella_contenido": "afc3ca03ec9bf9aab984932754f523fe0c29f5efa102239d545037b684576954",
+      "relectura_ok": true
+    },
+    "agg_depto_mes": {
+      "archivo": "agg_depto_mes.parquet",
+      "filas": 1914,
+      "columnas": [
+        "cod_dpto",
+        "fecha_mes",
+        "n_det",
+        "frp_total"
+      ],
+      "sha256_archivo": "7c68c8c9d754f51636cc2718288939ee10d875eb6ea87d0cd77eddd4f2ef5fb1",
+      "huella_contenido": "44cc51049d88918e9e5370f95ddab0951dd1e5e30e1a789f79faadaad67959c5",
+      "relectura_ok": true
+    },
+    "dim_mes": {
+      "archivo": "dim_mes.parquet",
+      "filas": 58,
+      "columnas": [
+        "fecha_mes",
+        "anio",
+        "mes",
+        "nombre_mes",
+        "trimestre"
+      ],
+      "sha256_archivo": "7a3500259c155c9377a2d80d79fe1a1359b4c6c97b25fd6ca6132dbc2f914078",
+      "huella_contenido": "8ad47ed4b4c613ffd580cf91d292f6e2e39cf4fd933f0a65b92e50e2c7840631",
+      "relectura_ok": true
+    },
+    "dim_municipio": {
+      "archivo": "dim_municipio.parquet",
+      "filas": 123,
+      "columnas": [
+        "cod_mpio",
+        "cod_dpto",
+        "nombre",
+        "cod_provincia",
+        "provincia",
+        "area_km2",
+        "lat_c",
+        "lon_c",
+        "elevacion_m",
+        "vigencia_mgn"
+      ],
+      "sha256_archivo": "508b13e56646f0b754f407ff23501d937703e0ec16cf7211a489d37727a0bb6d",
+      "huella_contenido": "544c422c9d100f09a981de2a8fdf9895294cdcad125230a4089a4a3cd68b5698",
+      "relectura_ok": true
+    },
+    "dim_departamento": {
+      "archivo": "dim_departamento.parquet",
+      "filas": 33,
+      "columnas": [
+        "cod_dpto",
+        "nombre_dpto"
+      ],
+      "sha256_archivo": "1a0a5ee2ab400a1adc909e5562e8241740d0db932d11a0dd653cdf6c988747ab",
+      "huella_contenido": "ac1948040c6cba53bbffe5c2a5560b5c7f47e2abf63522ee52812c894c2687e3",
+      "relectura_ok": true
+    },
+    "irat_sensibilidad": {
+      "archivo": "_analisis/irat_sensibilidad.parquet",
+      "filas": 7134,
+      "columnas": [
+        "cod_mpio",
+        "fecha_mes",
+        "n_det",
+        "irat",
+        "irat_orden",
+        "irat_iguales",
+        "orden_iguales",
+        "irat_solo_clima",
+        "orden_solo_clima"
+      ],
+      "sha256_archivo": "6023f01b01c02244580db6de3b7448fbe0d444d43c9a1dee2dbd00f90d89b861",
+      "huella_contenido": "db7116e0b7c769ae5179b3ab68408f347cb408c9541717cebfa41be633c6e8cf",
+      "relectura_ok": true
+    }
+  }
+}

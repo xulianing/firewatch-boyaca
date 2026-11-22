@@ -1,0 +1,150 @@
+{
+  "modulo": "firewatch.spark.export_gold",
+  "fecha_ejecucion": "2026-11-21T19:32:57",
+  "params": {
+    "silver": "data\\silver",
+    "inter": "data\\int",
+    "gold": "data\\gold",
+    "inicio": "2022-01-01",
+    "fin": "2026-10-31",
+    "dpto_boyaca": "15",
+    "ordenes_alto": "[4, 5]",
+    "decimales_huella": "6"
+  },
+  "filas": {
+    "fact_municipio_mes": 7134,
+    "fact_deteccion": 3908,
+    "agg_depto_mes": 1914,
+    "dim_mes": 58,
+    "dim_municipio": 123,
+    "dim_departamento": 33,
+    "irat_sensibilidad": 7134
+  },
+  "kpis_control": {
+    "K1_detecciones": 3908,
+    "K2_var_interanual": {
+      "periodo": "ene–octubre 2026 vs 2025",
+      "actual": 621,
+      "previo": 445,
+      "variacion": 0.3955056179775281
+    },
+    "K3_frp_medio_mw": 9.405890481064484,
+    "K4_municipios_riesgo_alto_ultimo_mes": {
+      "mes": "2026-10-01",
+      "municipios": 25
+    },
+    "K5_tasa_captura": 0.8474923234390993,
+    "K6_participacion_boyaca": 0.004566642244245248,
+    "denominador_K6_nacional": 855771
+  },
+  "checks": [
+    {
+      "id": "G-0",
+      "descripcion": "build_daily, climatology e irat publicados",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "build_daily": true,
+        "climatology": true,
+        "irat": true
+      },
+      "esperado": "todos true"
+    },
+    {
+      "id": "G-1",
+      "descripcion": "PK única en todas las tablas",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "fact_municipio_mes": 0,
+        "fact_deteccion": 0,
+        "agg_depto_mes": 0,
+        "dim_mes": 0,
+        "dim_municipio": 0,
+        "dim_departamento": 0,
+        "irat_sensibilidad": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "G-2",
+      "descripcion": "integridad referencial hechos → dimensiones",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "fact_municipio_mes.cod_mpio": 0,
+        "fact_deteccion.cod_mpio": 0,
+        "fact_municipio_mes.fecha_mes": 0,
+        "fact_deteccion.fecha_mes": 0,
+        "agg_depto_mes.fecha_mes": 0,
+        "agg_depto_mes.cod_dpto": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "G-3",
+      "descripcion": "conciliación de 4 vías de las detecciones de Boyacá (K1)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "silver": 3908,
+        "fact_municipio_mes": 3908,
+        "fact_deteccion": 3908,
+        "agg_depto_mes_boyaca": 3908
+      },
+      "esperado": "iguales (3908)"
+    },
+    {
+      "id": "G-4",
+      "descripcion": "conteos de las grillas (municipios × meses, dptos × meses, meses)",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "fact_municipio_mes": 7134,
+        "fact_deteccion": 3908,
+        "agg_depto_mes": 1914,
+        "dim_mes": 58,
+        "dim_municipio": 123,
+        "dim_departamento": 33
+      },
+      "esperado": {
+        "fact_municipio_mes": 7134,
+        "agg_depto_mes": 1914,
+        "dim_mes": 58
+      }
+    },
+    {
+      "id": "G-5",
+      "descripcion": "esquema y orden de columnas = contrato §6.6",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": "ok",
+      "esperado": "ok"
+    },
+    {
+      "id": "G-6",
+      "descripcion": "sin nulos en las claves",
+      "nivel": "bloqueante",
+      "ok": true,
+      "valor": {
+        "fact_municipio_mes": 0,
+        "fact_deteccion": 0,
+        "agg_depto_mes": 0,
+        "dim_mes": 0,
+        "dim_municipio": 0,
+        "dim_departamento": 0
+      },
+      "esperado": 0
+    },
+    {
+      "id": "G-7",
+      "descripcion": "dim_municipio con provincia (jerarquía del dashboard, R11)",
+      "nivel": "advertencia",
+      "ok": false,
+      "valor": false,
+      "esperado": true
+    }
+  ],
+  "publicado": true,
+  "tiempo_s": 7.874
+}
