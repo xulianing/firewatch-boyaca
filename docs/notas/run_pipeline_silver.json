@@ -1,0 +1,25 @@
+{
+  "stage": "silver",
+  "etapas": [
+    {
+      "etapa": "silver",
+      "ok": true,
+      "tiempo_s": 43.063296000000264,
+      "conteos": {
+        "n_raw": 960830,
+        "n_silver": 868094,
+        "n_vegetacion": 856655,
+        "k1_silver": 3908,
+        "procesos": 4,
+        "content_sha256": "a41f8fb81305565589fa19137a8eb1be2dc35d086a435a5889b7a6bc61743db4"
+      },
+      "error": null
+    }
+  ],
+  "conciliacion": {
+    "evaluada": false,
+    "k1_silver": 3908,
+    "k1_gold": null,
+    "ok": true
+  }
+}
