@@ -151,7 +151,7 @@ Todas las cifras salen de archivos versionados del repositorio (se indica la fue
 | Speedup / eficiencia `multiprocessing` (p = 8, Hyper-Threading) | 2,01 / 0,25 (40,2 s) | `mp_bench_resumen_20261121_0947.csv` |
 | Speedup Spark `clima_diario` (8 particiones, con lectura) | 1,93 con `local[4]` · 2,74 con `local[*]` (12 hilos) | `benchmarks/results/spark_bench_resumen_20261120_1949.csv` |
 | Tasa de captura del IRAT (Alto + Muy alto) — K5 | solo clima **60,7 %** → oficial **84,7 %** (pesos iguales 75,2 %; azar 40 %) | `docs/evidencias/irat_validation.json` |
-| ρ de Spearman IRAT(t) vs detecciones(t+1) | Pendiente: `notebooks/02_validacion_irat.ipynb` (B9) aún no tiene resultados | — |
+| ρ de Spearman IRAT vs detecciones (7.134 municipio-mes) | concurrente 0,287 · anticipado (t+1) 0,241 · solo clima 0,099 / 0,067 | `notebooks/02_validacion_irat.ipynb` (sobre el gold del data freeze) |
 | K2 · variación interanual (ene–oct 2026 vs 2025) | +39,6 % (621 vs 445) | `gold_validation.json` |
 | K3 · FRP medio | 9,41 MW | `gold_validation.json` |
 | K4 · municipios en riesgo alto (oct 2026) | 25 | `gold_validation.json` |
