@@ -4,7 +4,7 @@
 **Sistema distribuido de analítica geoespacial para el monitoreo de anomalías térmicas y la estimación de riesgo de incendios de cobertura vegetal en Boyacá, Colombia.**
 
 ![ODS 13](https://img.shields.io/badge/ODS-13%20Acci%C3%B3n%20por%20el%20clima-3F7E44)
-![Python](https://img.shields.io/badge/Python-3.11-3776AB)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 ![Spark](https://img.shields.io/badge/Apache%20Spark-3.5%20local-E25A1C)
 ![Power BI](https://img.shields.io/badge/Power%20BI-Dashboard-F2C811)
 ![Packet Tracer](https://img.shields.io/badge/Cisco-Packet%20Tracer-1BA0D7)
@@ -62,11 +62,11 @@ flowchart LR
 | Fuente | Producto | Uso |
 |---|---|---|
 | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/) | VIIRS 375 m, S-NPP y NOAA-20 (SP 2022–2025; SP + NRT 2026) | Detecciones de anomalías térmicas |
-| [Open-Meteo Historical API](https://open-meteo.com/en/docs/historical-weather-api) | Reanálisis ERA5 / ERA5-Land, horario, por centroide municipal | Temperatura, humedad, precipitación, viento, ET0 |
+| [Open-Meteo Historical API](https://open-meteo.com/en/docs/historical-weather-api) | Reanálisis ERA5 (`era5_seamless`), horario, por centroide municipal | Temperatura, humedad, precipitación, viento, ET0 |
 | [DANE – MGN](https://geoportal.dane.gov.co/) | Capa de municipios (DIVIPOLA) | Asignación espacial, áreas, centroides |
-| Gobernación de Boyacá | Tabla municipio → provincia (`config/provincias_boyaca.csv`) | Jerarquía del drill-down |
+| Gobernación de Boyacá (Secretaría de Planeación) | Tabla municipio → provincia (`config/provincias_boyaca.csv`, fuente citada en el [diccionario](docs/diccionario_datos.md)) | Provincia en `silver.dim_municipio` (no incorporada al dashboard) |
 
-> Los datos **no se versionan**. Se descargan con `scripts/download_all.py`. Ver [`data/README.md`](data/README.md).
+> Los datos **no se versionan**. Se descargan con `scripts/download_all.py` o se obtienen ya procesados desde la carpeta compartida de OneDrive (sección 6). Ver [`data/README.md`](data/README.md).
 
 ---
 
@@ -90,15 +90,15 @@ firewatch-boyaca/
 
 ## 5. Instalación
 
-**Requisitos:** Python 3.11 · Java 17 (para Spark) · Power BI Desktop (Windows) · Cisco Packet Tracer 8.x
+**Requisitos:** Python 3.11–3.12 (usado: 3.12.7) · Java 17 (solo para Spark) · Power BI Desktop (Windows) · Cisco Packet Tracer 8.x
 
 ```bash
-git clone https://github.com/<organizacion>/firewatch-boyaca.git
+git clone https://github.com/xulianing/firewatch-boyaca.git
 cd firewatch-boyaca
 python -m venv .venv
 # Windows: .venv\Scripts\activate   |   Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .            # instala el paquete firewatch (necesario para multiprocessing)
+python -m pip install -r requirements.txt
+python -m pip install -e .  # instala el paquete firewatch (necesario para multiprocessing)
 ```
 
 Verificación de Spark:
@@ -123,21 +123,42 @@ python benchmarks/bench_spark.py               # escalado de L3 por núcleos y p
 
 Todos los parámetros (fechas, filtros, pesos del IRAT, configuración de Spark) viven en [`config/settings.yaml`](config/settings.yaml).
 
+`run_pipeline.py` termina con código 0 si todo salió bien y con 1 si alguna etapa no publicó o si la conciliación
+K1 (vegetación de Boyacá en silver = K1 del gold) no cuadra. `--stage silver` no necesita Java.
+
+### Reproducción con los datos ya procesados (sin descargar las fuentes)
+
+1. Descargar los datos procesados desde la carpeta compartida del proyecto en OneDrive institucional (USTA): [COMPARTIDA_DRIVE](https://usantotomaseduco-my.sharepoint.com/:f:/g/personal/yeison_forero_usantoto_edu_co/IgDiE7otVECWSbjinxVMIsP6AeHmUr92FILT2m3T6XEn6FU?e=vWbptp).
+2. Descomprimir en `data/silver/` y `data/gold/` (borrar antes las carpetas existentes, para no mezclar versiones).
+3. Comprobar la versión del silver: `python -c "import pandas as pd; d=pd.read_parquet('data/silver/detecciones', columns=['cod_dpto','fuente_estatica']); print(((d.cod_dpto=='15') & ~d.fuente_estatica).sum())"` debe imprimir **3908**.
+4. Volver a generar el gold y comparar: `python scripts/run_pipeline.py --stage gold` (requiere Java 17) debe terminar con la conciliación K1 en OK.
+5. Pruebas: `python -m pytest -q`.
+
 ---
 
 ## 7. Resultados
 
-> *Esta sección se completa después del data freeze (sábado 7 de noviembre).*
+Todas las cifras salen de archivos versionados del repositorio (se indica la fuente de cada una).
 
-| Métrica | Valor |
-|---|---|
-| Detecciones procesadas (Colombia, ventana completa) | _pendiente_ |
-| Detecciones de vegetación en Boyacá | _pendiente_ |
-| Filas horarias de clima procesadas en Spark | ≈ 5,2 M |
-| Speedup máximo multiprocessing (p = 8) | _pendiente_ |
-| Eficiencia multiprocessing (p = 8) | _pendiente_ |
-| ρ de Spearman IRAT(t) vs detecciones(t+1) | _pendiente_ |
-| Tasa de captura del IRAT (Alto + Muy alto) | _pendiente_ |
+| Métrica | Valor | Fuente |
+|---|---|---|
+| Detecciones FIRMS raw (Colombia, ventana completa) | 960.830 | `data/silver/_reports/cleaning_metrics.json` · [`docs/notas/gate_volumen.md`](docs/notas/gate_volumen.md) |
+| Detecciones en silver (tras F1–F7) | 868.094 (9,65 % descartado) | `cleaning_metrics.json` |
+| Marcadas como fuente estática (ADR-0005) | 11.439 | `cleaning_metrics.json` |
+| Detecciones de vegetación en Boyacá (K1) | **3.908**, conciliadas silver = gold | `cleaning_metrics.json` · `docs/evidencias/gold_validation.json` |
+| Filas horarias de clima procesadas en Spark | 5.210.280 → 217.095 municipio-día | `docs/evidencias/build_daily_validation.json` |
+| Speedup / eficiencia `multiprocessing` (p = 4, producción) | **1,94 / 0,49** (80,9 s → 41,6 s) | `benchmarks/results/mp_bench_resumen_20261121_0947.csv` |
+| Speedup / eficiencia `multiprocessing` (p = 8, Hyper-Threading) | 2,01 / 0,25 (40,2 s) | `mp_bench_resumen_20261121_0947.csv` |
+| Speedup Spark `clima_diario` (8 particiones, con lectura) | 1,93 con `local[4]` · 2,74 con `local[*]` (12 hilos) | `benchmarks/results/spark_bench_resumen_20261120_1949.csv` |
+| Tasa de captura del IRAT (Alto + Muy alto) — K5 | solo clima **60,7 %** → oficial **84,7 %** (pesos iguales 75,2 %; azar 40 %) | `docs/evidencias/irat_validation.json` |
+| ρ de Spearman IRAT(t) vs detecciones(t+1) | Pendiente: `notebooks/02_validacion_irat.ipynb` (B9) aún no tiene resultados | — |
+| K2 · variación interanual (ene–oct 2026 vs 2025) | +39,6 % (621 vs 445) | `gold_validation.json` |
+| K3 · FRP medio | 9,41 MW | `gold_validation.json` |
+| K4 · municipios en riesgo alto (oct 2026) | 25 | `gold_validation.json` |
+| K6 · participación de Boyacá en Colombia | 0,457 % (3.908 / 855.771) | `gold_validation.json` |
+| Tablas gold | `fact_municipio_mes` 7.134 · `fact_deteccion` 3.908 · `agg_depto_mes` 1.914 · `dim_mes` 58 · `dim_municipio` 123 · `dim_departamento` 33 | `docs/evidencias/gold_manifest.json` (commit `a1b5775`) |
+
+K5 se reporta en ese orden porque el componente histórico (H) usa detecciones pasadas: parte de la diferencia entre 60,7 % y 84,7 % es circular.
 
 ---
 
@@ -156,9 +177,9 @@ Todos los parámetros (fechas, filtros, pesos del IRAT, configuración de Spark)
 
 | Rol | Integrante | Responsabilidades |
 |---|---|---|
-| A · Redes y Documento | _nombre_ | Packet Tracer, plan IP, edición del IEEE, póster |
-| B · Data Engineering y Paralelo | _nombre_ | Ingesta, limpieza, multiprocessing, EDA, reproducibilidad |
-| C · Spark y Power BI | _nombre_ | Pipeline Spark, IRAT, benchmark Spark, dashboard |
+| A · Redes y Documento | Dafne Giannina Suspes Arenas | Packet Tracer, plan IP, edición del IEEE, póster |
+| B · Data Engineering y Paralelo | Yeison Julián Forero Medina | Ingesta, limpieza, multiprocessing, EDA, reproducibilidad |
+| C · Spark y Power BI | Sara Sofía León Cristancho | Pipeline Spark, IRAT, benchmark Spark, dashboard |
 
 ---
 
@@ -167,7 +188,9 @@ Todos los parámetros (fechas, filtros, pesos del IRAT, configuración de Spark)
 - Una detección FIRMS es una **anomalía térmica**, no un incendio confirmado.
 - La línea base climática cubre 2022–2025 (restricción docente); las anomalías son **relativas a la ventana**.
 - El clima se representa por el centroide municipal (resolución ERA5).
-- Los datos de 2026 combinan procesamiento estándar (SP) y casi en tiempo real (NRT).
+- Los datos de 2026 combinan procesamiento estándar (SP, ene–jul) y casi en tiempo real (NRT, ago–oct); los meses NRT son provisionales.
+- La máscara de fuentes estáticas ampliada por persistencia ([ADR-0005](docs/adr/0005-mascara-por-persistencia.md)) deja un residuo industrial de ≈ 3 % en Boyacá (celdas contiguas a hornos de Samacá, Ráquira y Socha).
+- La provincia está en `silver.dim_municipio`, pero no se incorporó al gold ni al dashboard (decisión del equipo, 24 nov 2026).
 
 ---
 
