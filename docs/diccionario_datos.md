@@ -46,6 +46,15 @@ Clave única: (`cod_mpio`, `ts_local`).
 
 `cod_mpio` (PK) · `nombre` · `cod_provincia` · `provincia` · `area_km2` · `lat_c` · `lon_c` · `elevacion_m`
 
+**Provincia (`provincia`, `cod_provincia`).** Origen: `config/provincias_boyaca.csv`, generado por `scripts/build_provincias_boyaca.py` (cruce por nombre con los códigos DIVIPOLA de `config/centroides_boyaca.csv`; se detiene si algún municipio no casa 1 a 1). `cod_provincia` = *slug* ASCII en mayúsculas de `provincia` (D-G4, la misma regla que `dane.slugify_provincia`). 15 unidades territoriales: 13 provincias + Distrito Fronterizo + Zona de Manejo Especial.
+
+Fuentes oficiales (Gobernación de Boyacá):
+1. Secretaría de Planeación, Dirección de Seguimiento y Planeación Territorial, *Informe de Resultados de la Nueva Medición del Desempeño Municipal de la Vigencia Fiscal 2021 de los Municipios del Departamento de Boyacá*, Tunja, dic. 2022, cuadros 4–8 (provincia de cada municipio). https://planeacion.boyaca.gov.co/wp-content/uploads/2023/01/Informe-Medicion-Desempeno-Municipal-2021-123-Mpios-Depto-Boyaca.pdf
+2. Secretaría de Planeación, *Mapas PDF* (mapas de las 13 provincias, del Distrito Fronterizo y de la Zona de Manejo Especial). https://planeacion.boyaca.gov.co/mapas-boyaca/
+3. Secretaría de Cultura, Observatorio Cultural, *Provincias de Boyacá* (13 provincias y 2 distritos especiales: Puerto Boyacá y Cubará). https://observatoriocultural.boyaca.gov.co/provincias-de-boyaca/
+
+Notas: (a) la fuente 1 agrupa a Puerto Boyacá y Cubará como "Especial"; las fuentes 2 y 3 los separan, y así se publican: **Puerto Boyacá (15572) = Zona de Manejo Especial** y **Cubará (15223) = Distrito Fronterizo**. (b) Ventaquemada figura en **Márquez** en la fuente oficial (algunas fuentes no oficiales la ubican en Centro); manda la fuente oficial. (c) Consultadas el 24 nov 2026.
+
 ---
 
 ## Intermedias de Spark (no salen de L3)
