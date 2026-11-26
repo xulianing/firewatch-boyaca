@@ -171,6 +171,9 @@ K5 se reporta en ese orden porque el componente histórico (H) usa detecciones p
 | EDA + dashboard | [`notebooks/`](notebooks/), [`dashboard/`](dashboard/) | Analítica y Visualización de Datos |
 | Artículo IEEE (EN / ES), póster, demo | [`docs/`](docs/) | Las tres |
 
+| Video demostrativo | [Ver video](https://usantotomaseduco-my.sharepoint.com/:v:/g/personal/yeison_forero_usantoto_edu_co/IQAK0UnxwVPMS7_jWB22cVvqAVVQHK0ZtZTEwFz6vtuOtFU?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=LqSe9H) | Las tres |
+| Póster (EN / ES) | [`docs/poster/`](docs/poster/) | Las tres |
+| Versión entregada | tag `v1.0-entrega` | — |
 ---
 
 ## 9. Equipo
