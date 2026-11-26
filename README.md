@@ -160,6 +160,28 @@ Todas las cifras salen de archivos versionados del repositorio (se indica la fue
 
 K5 se reporta en ese orden porque el componente histórico (H) usa detecciones pasadas: parte de la diferencia entre 60,7 % y 84,7 % es circular.
 
+### Municipios a vigilar
+
+Fuente: `notebooks/01_eda.ipynb` y `notebooks/02_validacion_irat.ipynb` (gold `data-freeze`).
+
+| Municipio | Detecciones 2022 – oct 2026 | Detecciones por 100 km² al año |
+|---|---|---|
+| Puerto Boyacá | 573 | 7,84 |
+| Paya | 382 | 17,85 |
+| Güicán de la Sierra | 261 | 5,68 |
+| Aquitania | 209 | 4,60 |
+| Pisba | 197 | 8,79 |
+| Chiscas | 188 | 5,92 |
+| Mongua | 183 | 10,52 |
+| Labranzagrande | 144 | 5,14 |
+| Otanche | 136 | 5,93 |
+| Chita | 115 | 3,52 |
+
+- Estos 10 municipios concentran el 61,1 % de las detecciones; 7 alcanzan el 50 % y 22 el 80 % (Gini 0,78). 16 municipios no tienen detecciones en la ventana. La media departamental es 3,50 detecciones por 100 km² al año.
+- Temporada crítica: enero a marzo concentra el 68,6 % de las detecciones; agosto a septiembre, el 14,1 %. Los municipio-mes con más detecciones y mayor IRAT son de enero de 2024 (Mongua, Aquitania, Chiscas, Güicán de la Sierra) y febrero de 2023 (Tota, Paya).
+- En octubre de 2026 hay 25 municipios en riesgo Alto o Muy alto (K4); la lista está en la página 3 del dashboard.
+- Socha, Samacá y Ráquira tienen una firma compatible con fuentes industriales (detecciones nocturnas y persistentes, [ADR-0005](docs/adr/0005-mascara-por-persistencia.md)); no se presentan como prioridad de prevención sin verificación en campo.
+
 ---
 
 ## 8. Componentes entregables

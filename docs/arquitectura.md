@@ -3,6 +3,20 @@
 **Estado:** congelado el 2 de noviembre de 2026 · **v1.1: ventana temporal 2022-01-01 → 2026-10-31 por indicación de la docente (ADR-0004, ver Plan de Implementación §0)** · Coherente con el *Plan Director v2.1* y con *Restricciones del proyecto*
 **Principio rector:** cada componente existe porque cubre un requisito de la rúbrica (R1–R9). Lo que no cubre un requisito no se construye.
 
+> **Estado final (26 nov 2026, versión entregada `v1.0-entrega`).** Este documento es el diseño congelado el 2 de noviembre. Lo que cambió después está registrado en los ADR y en el código, que manda:
+>
+> | Tema | Diseño (este documento) | Implementación final |
+> |---|---|---|
+> | Máscara de fuentes estáticas | Celdas con `type = 2` | `type = 2` ∪ celdas persistentes (≥ 6 meses y ≥ 3 años), [ADR-0005](adr/0005-mascara-por-persistencia.md) |
+> | Bloques de `multiprocessing` | 100k–200k filas | 25.000 filas (38 bloques), orden LPT, 4 procesos en producción |
+> | Particiones de shuffle | Por definir | 8 (medido: 200 es ~4 veces más lento) |
+> | Gold para Power BI | Parquet + CSV | Power BI lee solo los Parquet (los CSV alteran decimales y códigos DIVIPOLA con la configuración regional de Colombia) |
+> | Quintiles del IRAT | Quintiles | Cortes exactos con `percentile`, no `ntile` (determinismo con empates) |
+> | UNGRD, `fase_enso`, demo de tolerancia a fallos | Opcionales (P1) | No implementados; quedan como trabajo futuro |
+> | Provincias | Semilla manual | `config/provincias_boyaca.csv` desde fuente oficial de la Gobernación (24 nov); ver `docs/diccionario_datos.md` |
+>
+> Resultados finales: README §7 y `docs/evidencias/`.
+
 ---
 
 ## 1. Arquitectura general
@@ -213,7 +227,7 @@ Los volúmenes marcados con `~` son estimaciones que se confirman el día 1.
 - **Ventana temporal fija: 2022-01-01 → 2026-10-31** (58 meses completos; octubre de 2026 es el último mes completo antes de la entrega). Se parametriza en `settings.yaml`, de modo que cambiarla solo requiere tocar ese archivo.
 - **Propensión histórica sin fuga de información (*leave-one-year-out*).** Para el mes *m* del año *a*, la propensión se calcula con todos los años de la ventana **excepto *a*** (quedan 3–4 años de referencia; ver §7.2). Si se incluyera el propio año, el índice "vería" el resultado que luego se usa para validarlo.
 - **Simplificación de geometrías** con una tolerancia de ~0,0003° (≈33 m), menor que el píxel VIIRS de 375 m. Reduce memoria y tiempo por proceso sin alterar de forma material la asignación de municipio.
-- **Asignación de bloques en multiprocessing:** bloques de tamaño fijo (por ejemplo, 100–200k filas) y no un bloque por año, porque los años tienen volúmenes muy distintos y eso desbalancea la carga. Cada proceso trabajador carga los polígonos una sola vez (función `initializer` del Pool) para no serializarlos con cada tarea.
+- **Asignación de bloques en multiprocessing:** bloques de tamaño fijo (implementado: 25.000 filas, 38 bloques, orden LPT) y no un bloque por año, porque los años tienen volúmenes muy distintos y eso desbalancea la carga. Cada proceso trabajador carga los polígonos una sola vez (función `initializer` del Pool) para no serializarlos con cada tarea.
 
 ---
 
@@ -251,7 +265,7 @@ Los volúmenes marcados con `~` son estimaciones que se confirman el día 1.
 | F4 | **Tabla de provincias de Boyacá** | Archivo semilla `config/provincias_boyaca.csv`, construido a mano a partir de fuente oficial de la Gobernación | 123 municipios | Código de municipio → provincia | Jerarquía para el drill-down | **P0** (~1 h) |
 | F5 | **UNGRD** – consolidado de emergencias | Datos abiertos (datos.gov.co), evento "incendio de cobertura vegetal" | Boyacá, por año | Municipio, fecha, evento | Validación externa del IRAT | **P1** |
 
-**Tratamiento SP frente a NRT (2026):** los datos NRT no traen `type`. Para filtrar las fuentes industriales en todo el periodo se construye una **máscara de fuentes estáticas** a partir de las detecciones SP 2022–2025 con `type = 2`, agrupadas en celdas de ~0,005°. Esa máscara se aplica a todas las detecciones, y se conserva la columna `proceso` (SP/NRT) para trazabilidad.
+**Tratamiento SP frente a NRT (2026):** los datos NRT no traen `type`. Para filtrar las fuentes industriales en todo el periodo se construye una **máscara de fuentes estáticas** a partir de las detecciones SP 2022–2025 con `type = 2`, agrupadas en celdas de ~0,005°, ampliada después con las celdas persistentes (ADR-0005). Esa máscara se aplica a todas las detecciones, y se conserva la columna `proceso` (SP/NRT) para trazabilidad.
 
 **Descartadas y por qué (para la sección II/III del IEEE):**
 - **IDEAM DHIME:** estaciones con series incompletas, descarga manual y lenta, cobertura espacial desigual en Boyacá. ERA5 da continuidad espacio-temporal y está validado en la literatura.
