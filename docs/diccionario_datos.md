@@ -1,8 +1,8 @@
 # Diccionario de datos — contratos entre capas (entregable C2)
 
-**Fuente de verdad** para todos los esquemas. Basado en Arquitectura §9 (v1.1). Si un esquema cambia, primero se actualiza este documento y se avisa en el grupo. **Después del data freeze (sáb 7) no se cambia.**
+**Fuente de verdad** para todos los esquemas. Basado en Arquitectura §9 (v1.1). Si un esquema cambia, primero se actualiza este documento y se avisa en el grupo. **Después del data freeze (21 nov 2026, *tag* `data-freeze`) no se cambia.**
 
-Convenciones: `cod_dpto` = texto de 2 caracteres · `cod_mpio` = texto de 5 caracteres · fechas en ISO (`YYYY-MM-DD`) · `fecha_mes` = primer día del mes · Parquet en silver, Parquet + CSV (UTF-8, coma) en gold.
+Convenciones: `cod_dpto` = texto de 2 caracteres · `cod_mpio` = texto de 5 caracteres · fechas en ISO (`YYYY-MM-DD`) · `fecha_mes` = primer día del mes · Parquet en silver; en gold, Parquet (lo que lee Power BI) y una copia CSV (`utf-8-sig`) solo para consulta.
 
 ---
 
@@ -91,7 +91,7 @@ Notas: (a) la fuente 1 agrupa a Puerto Boyacá y Cubará como "Especial"; las fu
 
 `id_det` (PK) · `cod_mpio` (FK) · `fecha` · `fecha_mes` (FK) · `hora_utc` · `lat` · `lon` · `frp` · `confianza` · `daynight` · `satelite`
 
-### `agg_depto_mes` — ~33 × 58
+### `agg_depto_mes` — 1.914 filas (33 × 58)
 
 `cod_dpto` (FK) · `fecha_mes` (FK) · `n_det` · `frp_total`
 
@@ -100,9 +100,9 @@ Notas: (a) la fuente 1 agrupa a Puerto Boyacá y Cubará como "Especial"; las fu
 | Tabla | Filas | Columnas |
 |---|---|---|
 | `dim_municipio` | 123 | igual que la silver |
-| `dim_departamento` | ~33 | `cod_dpto` (PK) · `nombre` |
-| `dim_mes` | 58 | `fecha_mes` (PK) · `anio` · `mes` · `nombre_mes` · `trimestre` · `fase_enso` (P1) |
+| `dim_departamento` | 33 | `cod_dpto` (PK) · `nombre_dpto` (en silver la columna se llama `nombre`; `export_gold` la renombra) |
+| `dim_mes` | 58 | `fecha_mes` (PK) · `anio` · `mes` · `nombre_mes` · `trimestre` |
 
 ---
 
-**Aprobación:** B ☐ · C ☐ · Fecha: ____
+Filas observadas en la versión `data-freeze`: ver `docs/evidencias/gold_manifest.json`. Tabla auxiliar `_analisis/irat_sensibilidad` (7.134 filas): `cod_mpio, fecha_mes, n_det, irat, irat_orden, irat_iguales, orden_iguales, irat_solo_clima, orden_solo_clima`; no es contrato gold.

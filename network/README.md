@@ -1,23 +1,34 @@
-# network/ — Infraestructura de red en Packet Tracer (R2) · dueño único: A
+# network/ — Infraestructura de red en Packet Tracer (R2) · autora: Dafne Suspes (A)
 
-| Archivo / carpeta | Contenido | Tarea | Fecha |
-|---|---|---|---|
-| `plan_direccionamiento.md` | Tabla VLSM y tabla de direccionamiento por dispositivo | A1 | Lun 2 |
-| `firewatch.pkt` | Topología completa (solo A hace *commit*) | A3 → A4 | Mié 4 → Vie 6 |
-| `configs/` | `show running-config` de cada router y switch, como `.txt` (`R-TUNJA.txt`, …) | A4 | Vie 6 |
-| `evidencias/` | Capturas: `show ip route`, `show ip ospf neighbor`, `show ip interface brief`, ping y tracert de extremo a extremo, DHCP asignando direcciones | A5 | Vie 6 |
+| Archivo / carpeta | Contenido |
+|---|---|
+| `firewatch.pkt` | **Topología final** (configuraciones de routers, switches, servidores y PC incluidas en el archivo) |
+| `plan_direccionamiento.md` | VLSM, tabla de subredes, tabla por dispositivo, VLAN y OSPF |
+| `evidencias/` | Capturas de verificación (topología, tablas de rutas, vecinos OSPF, ping/tracert, DHCP, VLAN/troncal, DNS/HTTP) |
+| `evidencias/Prototipo1.pkt`, `evidencias/Prototipo2.pkt` | Versiones anteriores, solo como historial del diseño. **El archivo que se evalúa es `firewatch.pkt`** |
 
-## Diseño (Arquitectura §11)
+`configs/` quedó sin archivos: las configuraciones viven dentro de `firewatch.pkt` y se pueden ver con `show running-config` en cada equipo.
 
-- **Routers:** R-TUNJA (núcleo y centro de datos), R-DUITAMA, R-SOGAMOSO, R-ISP (simula Internet y las fuentes externas).
-- **Enrutamiento:** OSPF área 0 en todos los routers. ACL hacia la subred del centro de datos como P1.
-- **Segmentos:** Centro de datos · Analistas · Gestión del riesgo (CDGRD) · Sede Duitama · Sede Sogamoso · Internet · enlaces WAN /30.
-- **Servidores** (nombres exactos): `SRV-INGESTA`, `SRV-PROCESAMIENTO`, `SRV-ALMACENAMIENTO`, `SRV-BI`, `SRV-FIRMS-SIM`, `SRV-METEO-SIM`.
-- **Servicios:** DHCP en las LAN de usuarios; HTTP en `SRV-BI` y en los servidores simulados; DNS opcional.
-- **Escalabilidad:** la subred del centro de datos se dimensiona con hosts libres para futuros nodos worker de Spark (argumento compartido con CPD).
+## Diseño
 
-## Convenciones
+- **Bloque:** 172.16.15.0/24 (RFC 1918) con VLSM en 10 subredes; se usan 216 de 256 direcciones. Regla de tamaño: hosts × 1,5 + gateway.
+- **Routers (2911):** R-TUNJA (núcleo y centro de datos), R-DUITAMA, R-SOGAMOSO y R-ISP (simula Internet y las fuentes externas).
+- **Enlaces WAN:** seriales /30. Tunja, Duitama y Sogamoso forman un triángulo (redundancia); Tunja se conecta además con R-ISP.
+- **Tunja:** SW-TUNJA con VLAN 10 (centro de datos), 20 (analistas) y 30 (CDGRD), troncal 802.1Q hacia R-TUNJA (router-on-a-stick, subinterfaces Gi0/0.10/.20/.30).
+- **Enrutamiento:** OSPF proceso 1, área 0; router-id 1.1.1.1 a 4.4.4.4; LAN como interfaces pasivas; costo serial 64, Gigabit 1.
+- **Servicios:** DHCP en las LAN de usuarios; DNS en SRV-INGESTA; HTTP en SRV-BI y en los servidores simulados.
+- **Servidores:** `SRV-INGESTA`, `SRV-PROCESAMIENTO`, `SRV-ALMACENAMIENTO`, `SRV-BI` (centro de datos, .66–.69) y `SRV-FIRMS-SIM`, `SRV-METEO-SIM` (detrás de R-ISP). El rango .70–.94 del centro de datos queda reservado para futuros workers de Spark.
 
-- *Hostnames* en mayúsculas iguales a los del diagrama; `description` en todas las interfaces WAN.
-- Direcciones de gateway: la **primera** IP utilizable de cada subred.
-- Cada cambio en el `.pkt` va acompañado de la actualización de `plan_direccionamiento.md` y de `configs/`.
+Detalle completo en [`plan_direccionamiento.md`](plan_direccionamiento.md).
+
+## Verificación (capturas en `evidencias/`)
+
+- Adyacencias OSPF en estado FULL; cada router aprende por OSPF las subredes remotas. R-TUNJA llega a las LAN de Duitama y Sogamoso con costo 65 (serial 64 + red de destino 1); R-DUITAMA y R-SOGAMOSO tienen dos rutas de igual costo (128) hacia el enlace opuesto del triángulo.
+- PC-SOG-1 recibe por DHCP 172.16.15.166/27, gateway .161 y DNS .66, y alcanza SRV-BI (4/4).
+- SRV-PROCESAMIENTO alcanza SRV-FIRMS-SIM en 3 saltos.
+- VLAN y troncal en SW-TUNJA (`vlan_trunk_SW-TUNJA.png`).
+- Acceso por nombre al servicio HTTP de SRV-BI desde PC-DUI-1 (`http_dns_PC-DUI-1.png`).
+
+## Simplificación declarada
+
+R-ISP participa en OSPF para que las fuentes simuladas sean alcanzables. Un proveedor real no comparte su IGP: lo normal sería una ruta por defecto hacia el ISP.
